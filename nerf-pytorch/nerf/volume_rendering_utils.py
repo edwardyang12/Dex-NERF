@@ -37,15 +37,24 @@ def volume_render_radiance_field(
         # noise = noise.to(radiance_field)
     sigma_a = torch.nn.functional.relu(radiance_field[..., 3] + noise)
 
-    # TODO: EDWARD EDIT THIS LINE (SECTION 4.3)
     alpha = 1.0 - torch.exp(-sigma_a * dists)
     weights = alpha * cumprod_exclusive(1.0 - alpha + 1e-10)
 
     rgb_map = weights[..., None] * rgb
     rgb_map = rgb_map.sum(dim=-2)
-    depth_map = weights * depth_values
-    depth_map = depth_map.sum(dim=-1)
-    # depth_map = (weights * depth_values).sum(dim=-1)
+    
+    # nerf
+    # depth_map = weights * depth_values
+    # depth_map = depth_map.sum(dim=-1)
+    
+    # dex nerf
+    threshold_map = sigma_a > 15 # CONSTANT THEY SET 
+    indices = torch.argmax(threshold_map.int(), 1, keepdim=True)
+    depth_map = torch.zeros((indices.shape[0]), device=ray_directions.device)
+    for i in range(indices.shape[0]):
+        depth_map[i] = dists[i][indices[i][0]]
+
+    # both
     acc_map = weights.sum(dim=-1)
     disp_map = 1.0 / torch.max(1e-10 * torch.ones_like(depth_map), depth_map / acc_map)
 
