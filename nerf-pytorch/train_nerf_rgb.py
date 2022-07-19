@@ -12,7 +12,7 @@ from tqdm import tqdm, trange
 
 from nerf import (CfgNode, get_embedding_function, get_ray_bundle, img2mse,
                   load_blender_data, load_llff_data, meshgrid_xy, models,
-                  mse2psnr, run_one_iter_of_nerf)
+                  mse2psnr, run_one_iter_of_nerf, load_messytable_data)
 
 
 def main():
@@ -53,15 +53,14 @@ def main():
         # Load dataset
         images, poses, render_poses, hwf = None, None, None, None
         if cfg.dataset.type.lower() == "blender":
-            images, poses, render_poses, hwf, i_split = load_blender_data(
+            images, poses, render_poses, hwf, i_split, intrinsics = load_messytable_data(
                 cfg.dataset.basedir,
                 half_res=cfg.dataset.half_res,
                 testskip=cfg.dataset.testskip,
             )
             i_train, i_val, i_test = i_split
-            H, W, focal = hwf
+            H, W, _ = hwf
             H, W = int(H), int(W)
-            hwf = [H, W, focal]
             if cfg.nerf.train.white_background:
                 images = images[..., :3] * images[..., -1:] + (1.0 - images[..., -1:])
         elif cfg.dataset.type.lower() == "llff":
@@ -69,7 +68,7 @@ def main():
                 cfg.dataset.basedir, factor=cfg.dataset.downsample_factor
             )
             hwf = poses[0, :3, -1]
-            poses = poses[:, :3, :4]
+            poses = poses[:, :, :]
             if not isinstance(i_test, list):
                 i_test = [i_test]
             if cfg.dataset.llffhold > 0:
@@ -168,7 +167,7 @@ def main():
 
         model_coarse.train()
         if model_fine:
-            model_coarse.train()
+            model_fine.train()
 
         rgb_coarse, rgb_fine = None, None
         target_ray_values = None
@@ -209,8 +208,16 @@ def main():
         else:
             img_idx = np.random.choice(i_train)
             img_target = images[img_idx].to(device)
-            pose_target = poses[img_idx, :3, :4].to(device)
-            ray_origins, ray_directions = get_ray_bundle(H, W, focal, pose_target)
+            pose_target = poses[img_idx, :, :].to(device)
+            #print("===========================================")
+            #print(pose_target)
+
+            #print(pose_target.shape)
+            intrinsic_target = intrinsics[img_idx,:,:].to(device)
+            #print(intrinsic_target)
+            #print(img_idx)
+            #print("===========================================")
+            ray_origins, ray_directions = get_ray_bundle(H, W, focal, pose_target, intrinsic_target)
             coords = torch.stack(
                 meshgrid_xy(torch.arange(H).to(device), torch.arange(W).to(device)),
                 dim=-1,
@@ -221,7 +228,9 @@ def main():
             )
             select_inds = coords[select_inds]
             ray_origins = ray_origins[select_inds[:, 0], select_inds[:, 1], :]
+            #print(ray_directions.shape)
             ray_directions = ray_directions[select_inds[:, 0], select_inds[:, 1], :]
+            #print(ray_directions.shape)
             # batch_rays = torch.stack([ray_origins, ray_directions], dim=0)
             #print(img_target.shape)
             
@@ -234,7 +243,7 @@ def main():
             rgb_coarse, _, _, rgb_fine, _, _ = run_one_iter_of_nerf(
                 H,
                 W,
-                focal,
+                intrinsic_target[0,0],
                 model_coarse,
                 model_fine,
                 ray_origins,
@@ -244,26 +253,22 @@ def main():
                 encode_position_fn=encode_position_fn,
                 encode_direction_fn=encode_direction_fn,
             )
-            rgb_coarse = torch.mean(rgb_coarse, dim=-1)
-            rgb_fine = torch.mean(rgb_fine, dim=-1)
+            #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
+            #rgb_fine = torch.mean(rgb_fine, dim=-1)
             #print(rgb_coarse.shape, rgb_fine.shape)
             target_ray_values = target_s
             #assert 1==0
         
-        #coarse_loss = torch.nn.functional.mse_loss(
-        #    rgb_coarse[..., :3], target_ray_values[..., :3]
-        #)
         coarse_loss = torch.nn.functional.mse_loss(
-            rgb_coarse, target_ray_values
+            rgb_coarse[..., :3], target_ray_values[..., :3]
         )
+       
         fine_loss = None
         if rgb_fine is not None:
-            #fine_loss = torch.nn.functional.mse_loss(
-            #    rgb_fine[..., :3], target_ray_values[..., :3]
-            #)
             fine_loss = torch.nn.functional.mse_loss(
-                rgb_fine, target_ray_values
+                rgb_fine[..., :3], target_ray_values[..., :3]
             )
+            
         # loss = torch.nn.functional.mse_loss(rgb_pred[..., :3], target_s[..., :3])
         loss = 0.0
         # if fine_loss is not None:
@@ -333,14 +338,15 @@ def main():
                 else:
                     img_idx = np.random.choice(i_val)
                     img_target = images[img_idx].to(device)
-                    pose_target = poses[img_idx, :3, :4].to(device)
+                    pose_target = poses[img_idx, :, :].to(device)
+                    intrinsic_target = intrinsics[img_idx,:,:].to(device)
                     ray_origins, ray_directions = get_ray_bundle(
-                        H, W, focal, pose_target
+                        H, W, focal, pose_target, intrinsic_target
                     )
                     rgb_coarse, _, _, rgb_fine, _, _ = run_one_iter_of_nerf(
                         H,
                         W,
-                        focal,
+                        intrinsic_target[0,0],
                         model_coarse,
                         model_fine,
                         ray_origins,
@@ -351,8 +357,8 @@ def main():
                         encode_direction_fn=encode_direction_fn,
                     )
                     target_ray_values = img_target
-                    rgb_coarse = torch.mean(rgb_coarse, dim=-1)
-                    rgb_fine = torch.mean(rgb_fine, dim=-1)
+                    #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
+                    #rgb_fine = torch.mean(rgb_fine, dim=-1)
                 #print(target_ray_values.shape, rgb_coarse.shape)
                 #assert 1==0
                 coarse_loss = img2mse(rgb_coarse[..., :3], target_ray_values[..., :3])

@@ -7,13 +7,13 @@ experiment:
   # Seed for random number generators (for repeatability).
   randomseed: 42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 50000
+  train_iters: 500000
   # Number of training iterations after which to validate.
-  validate_every: 100
+  validate_every: 1000
   # Number of training iterations after which to checkpoint.
-  save_every: 2500
+  save_every: 25000
   # Number of training iterations after which to print progress.
-  print_every: 100
+  print_every: 1000
 
 # Dataset parameters.
 dataset:
@@ -108,7 +108,7 @@ optimizer:
   type: Adam
   # Learning rate.
   lr: 5.0E-3
-
+ 
 # Learning rate schedule.
 scheduler:
   # Exponentially decay learning rate (in 1000 steps)

@@ -244,8 +244,12 @@ def main():
                 encode_position_fn=encode_position_fn,
                 encode_direction_fn=encode_direction_fn,
             )
-            rgb_coarse = torch.mean(rgb_coarse, dim=-1)
-            rgb_fine = torch.mean(rgb_fine, dim=-1)
+            rgb_coarse = 0.299*rgb_coarse[...,0] + 0.587*rgb_coarse[...,1] + 0.114*rgb_coarse[...,2]
+            rgb_fine = 0.299*rgb_fine[...,0] + 0.587*rgb_fine[...,1] + 0.114*rgb_fine[...,2]
+            #print(rgb_coarse.shape)
+            #assert 1==0
+            #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
+            #rgb_fine = torch.mean(rgb_fine, dim=-1)
             #print(rgb_coarse.shape, rgb_fine.shape)
             target_ray_values = target_s
             #assert 1==0
@@ -351,14 +355,14 @@ def main():
                         encode_direction_fn=encode_direction_fn,
                     )
                     target_ray_values = img_target
-                    rgb_coarse = torch.mean(rgb_coarse, dim=-1)
-                    rgb_fine = torch.mean(rgb_fine, dim=-1)
+                    rgb_coarse = 0.299*rgb_coarse[...,0] + 0.587*rgb_coarse[...,1] + 0.114*rgb_coarse[...,2]
+                    rgb_fine = 0.299*rgb_fine[...,0] + 0.587*rgb_fine[...,1] + 0.114*rgb_fine[...,2]
                 #print(target_ray_values.shape, rgb_coarse.shape)
                 #assert 1==0
-                coarse_loss = img2mse(rgb_coarse[..., :3], target_ray_values[..., :3])
+                coarse_loss = img2mse(rgb_coarse, target_ray_values)
                 loss, fine_loss = 0.0, 0.0
                 if rgb_fine is not None:
-                    fine_loss = img2mse(rgb_fine[..., :3], target_ray_values[..., :3])
+                    fine_loss = img2mse(rgb_fine, target_ray_values)
                     loss = fine_loss
                 else:
                     loss = coarse_loss
@@ -368,17 +372,18 @@ def main():
                 writer.add_scalar("validation/coarse_loss", coarse_loss.item(), i)
                 writer.add_scalar("validataion/psnr", psnr, i)
                 writer.add_image(
-                    "validation/rgb_coarse", cast_to_image(rgb_coarse[..., :3]), i
+                    "validation/rgb_coarse", cast_to_image(rgb_coarse), i, dataformats='HW'
                 )
                 if rgb_fine is not None:
                     writer.add_image(
-                        "validation/rgb_fine", cast_to_image(rgb_fine[..., :3]), i
+                        "validation/rgb_fine", cast_to_image(rgb_fine), i, dataformats='HW'
                     )
                     writer.add_scalar("validation/fine_loss", fine_loss.item(), i)
                 writer.add_image(
                     "validation/img_target",
-                    cast_to_image(target_ray_values[..., :3]),
+                    cast_to_image(target_ray_values),
                     i,
+                    dataformats='HW'
                 )
                 tqdm.write(
                     "Validation loss: "
@@ -411,11 +416,11 @@ def main():
 
 def cast_to_image(tensor):
     # Input tensor is (H, W, 3). Convert to (3, H, W).
-    tensor = tensor.permute(2, 0, 1)
+    #tensor = tensor.permute(2, 0, 1)
     # Conver to PIL Image and then np.array (output shape: (H, W, 3))
     img = np.array(torchvision.transforms.ToPILImage()(tensor.detach().cpu()))
     # Map back to shape (3, H, W), as tensorboard needs channels first.
-    img = np.moveaxis(img, [-1], [0])
+    #img = np.moveaxis(img, [-1], [0])
     return img
 
 

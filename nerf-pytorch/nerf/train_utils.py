@@ -35,6 +35,7 @@ def predict_and_render_radiance(
     encode_direction_fn=None,
 ):
     # TESTED
+    #print(ray_batch.shape)
     num_rays = ray_batch.shape[0]
     ro, rd = ray_batch[..., :3], ray_batch[..., 3:6]
     bounds = ray_batch[..., 6:8].view((-1, 1, 2))
@@ -50,10 +51,12 @@ def predict_and_render_radiance(
         device=ro.device,
     )
     if not getattr(options.nerf, mode).lindisp:
+        #print("enter")
         z_vals = near * (1.0 - t_vals) + far * t_vals
     else:
         z_vals = 1.0 / (1.0 / near * (1.0 - t_vals) + 1.0 / far * t_vals)
     z_vals = z_vals.expand([num_rays, getattr(options.nerf, mode).num_coarse])
+    
 
     if getattr(options.nerf, mode).perturb:
         # Get intervals between samples.
@@ -64,6 +67,7 @@ def predict_and_render_radiance(
         t_rand = torch.rand(z_vals.shape, dtype=ro.dtype, device=ro.device)
         z_vals = lower + (upper - lower) * t_rand
     # pts -> (num_rays, N_samples, 3)
+    #print(z_vals.shape)
     pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
 
     radiance_field = run_network(
@@ -74,6 +78,7 @@ def predict_and_render_radiance(
         encode_position_fn,
         encode_direction_fn,
     )
+    #print(radiance_field.shape)
 
     (
         rgb_coarse,
@@ -103,6 +108,8 @@ def predict_and_render_radiance(
         z_samples = z_samples.detach()
 
         z_vals, _ = torch.sort(torch.cat((z_vals, z_samples), dim=-1), dim=-1)
+        
+        #print(z_samples[0,:])
         # pts -> (N_rays, N_samples + N_importance, 3)
         pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
 
@@ -141,6 +148,8 @@ def run_one_iter_of_nerf(
     encode_direction_fn=None,
 ):
     viewdirs = None
+    #print(ray_directions.shape, ray_origins.shape)
+    
     if options.nerf.use_viewdirs:
         # Provide ray directions as input
         viewdirs = ray_directions
@@ -156,6 +165,7 @@ def run_one_iter_of_nerf(
         restore_shapes += restore_shapes
         restore_shapes += restore_shapes
     if options.dataset.no_ndc is False:
+        #print("no_ndc")
         ro, rd = ndc_rays(height, width, focal_length, 1.0, ray_origins, ray_directions)
         ro = ro.view((-1, 3))
         rd = rd.view((-1, 3))
@@ -175,11 +185,13 @@ def run_one_iter_of_nerf(
             model_coarse,
             model_fine,
             options,
+            mode=mode,
             encode_position_fn=encode_position_fn,
             encode_direction_fn=encode_direction_fn,
         )
         for batch in batches
     ]
+    #assert 1==0
     synthesized_images = list(zip(*pred))
     synthesized_images = [
         torch.cat(image, dim=0) if image[0] is not None else (None)

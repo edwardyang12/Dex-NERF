@@ -1,6 +1,6 @@
 import math
 from typing import Optional
-
+import numpy as np
 import torch
 
 import torchsearchsorted
@@ -65,7 +65,7 @@ def cumprod_exclusive(tensor: torch.Tensor) -> torch.Tensor:
 
 
 def get_ray_bundle(
-    height: int, width: int, focal_length: float, tform_cam2world: torch.Tensor
+    height: int, width: int, focal_length: float, tform_cam2world: torch.Tensor, intrinsic: torch.Tensor
 ):
     r"""Compute the bundle of rays passing through all pixels of an image (one ray per pixel).
 
@@ -97,16 +97,18 @@ def get_ray_bundle(
     )
     directions = torch.stack(
         [
-            (ii - width * 0.5) / focal_length,
-            -(jj - height * 0.5) / focal_length,
-            -torch.ones_like(ii),
+            (ii - intrinsic[0,2]) / intrinsic[0,0],
+            (jj - intrinsic[1,2]) / intrinsic[0,0],
+            torch.ones_like(ii),
         ],
         dim=-1,
     )
     ray_directions = torch.sum(
-        directions[..., None, :] * tform_cam2world[:3, :3], dim=-1
+        directions[..., None, :] * torch.inverse(tform_cam2world[:3, :3]), dim=-1
     )
-    ray_origins = tform_cam2world[:3, -1].expand(ray_directions.shape)
+    ray_origins = torch.inverse(tform_cam2world)[:3, -1].expand(ray_directions.shape)
+    #print(ray_origins[0,0,:])
+    #assert 1==0
     return ray_origins, ray_directions
 
 
