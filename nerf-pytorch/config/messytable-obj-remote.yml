@@ -164,4 +164,4 @@ nerf:
     radiance_field_noise_std: 0.
     # Sample linearly in disparity space, as opposed to in depth space.
     lindisp: False
-    m_thres: 15
+    m_thres: 100
