@@ -3,7 +3,7 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: ../logs13
+  logdir: ../logs14
   # Seed for random number generators (for repeatability).
   randomseed: 42  # Cause, why not?
   # Number of training iterations.
@@ -35,7 +35,7 @@ dataset:
   # Near clip plane (clip all depth values closer than this threshold).
   near: 0.3
   # Far clip plane (clip all depth values farther than this threshold).
-  far: 4.3
+  far: 4
 
 # Model parameters.
 models:
