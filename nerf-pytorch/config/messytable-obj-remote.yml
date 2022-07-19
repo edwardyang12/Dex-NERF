@@ -7,13 +7,13 @@ experiment:
   # Seed for random number generators (for repeatability).
   randomseed: 42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 1000000
+  train_iters: 100000
   # Number of training iterations after which to validate.
-  validate_every: 1000
+  validate_every: 5000
   # Number of training iterations after which to checkpoint.
   save_every: 25000
   # Number of training iterations after which to print progress.
-  print_every: 1000
+  print_every: 5000
 
 # Dataset parameters.
 dataset:
@@ -33,9 +33,9 @@ dataset:
   # synthetic (Blender) datasets.
   no_ndc: True
   # Near clip plane (clip all depth values closer than this threshold).
-  near: 2
+  near: 0.3
   # Far clip plane (clip all depth values farther than this threshold).
-  far: 6
+  far: 4
 
 # Model parameters.
 models:
