@@ -6,6 +6,7 @@ import imageio
 import numpy as np
 import torch
 import pickle
+from PIL import Image
 
 def translate_by_t_along_z(t):
     tform = np.eye(4).astype(np.float32)
@@ -140,12 +141,14 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False):
     all_imgs = []
     all_poses = []
     all_intrinsics = []
+    all_depths = []
     counts = [0]
     for s in splits:
         path = os.path.join(basedir, s)
         imgs = []
         poses = []
         intrinsics = []
+        depths = []
         #print(os.listdir(path))
         for prefix in os.listdir(path):
             #print(os.path.join(path, prefix, 'meta.pkl'))
@@ -158,9 +161,11 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False):
 
             #for frame in meta["frames"][::skip]:
             fname = os.path.join(path, prefix, "0128_rgbL_kuafu.png")
+            gt_depth_fname = os.path.join(path, prefix, "depthL.png")
             #testimg = np.array(imageio.imread(fname))
             #print(testimg.shape, np.max(testimg), np.min(testimg))
             imgs.append(imageio.imread(fname))
+            depths.append(np.array(Image.open(gt_depth_fname))/1000)
             poses.append(np.array(meta["extrinsic_l"]))
             if half_res:
                 intrinsics_c = np.array(meta['intrinsic_l'])
@@ -176,6 +181,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False):
         poses = np.array(poses).astype(np.float32)
         intrinsics = np.array(intrinsics).astype(np.float32)
         imgs = (np.array(imgs) / 255.0).astype(np.float32)
+        depths = np.array(depths).astype(np.float32)
         #print(imgs.shape)
         counts.append(counts[-1] + imgs.shape[0])
         #assert 1==0
@@ -183,12 +189,14 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False):
         all_imgs.append(imgs)
         all_poses.append(poses)
         all_intrinsics.append(intrinsics)
+        all_depths.append(depths)
 
     i_split = [np.arange(counts[i], counts[i + 1]) for i in range(len(splits))]
 
     imgs = np.concatenate(all_imgs, 0)
     poses = np.concatenate(all_poses, 0)
     intrinsics = np.concatenate(all_intrinsics, 0)
+    depths = np.concatenate(all_depths,0)
 
     H, W = imgs[0].shape[:2]
     #camera_angle_x = float(meta["camera_angle_x"])
@@ -214,8 +222,18 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False):
             for i in range(imgs.shape[0])
         ]
         imgs = torch.stack(imgs, 0)
+
+        depths = [
+            torch.from_numpy(
+                cv2.resize(depths[i], dsize=(25, 25), interpolation=cv2.INTER_NEAREST)
+            )
+            for i in range(depths.shape[0])
+        ]
+        depths = torch.stack(depths, 0)
+
         poses = torch.from_numpy(poses)
-        return imgs, poses, render_poses, [H, W, focal], i_split
+        intrinsics = torch.from_numpy(intrinsics)
+        return imgs, poses, render_poses, [H, W, focal], i_split, intrinsics, depths
 
     if half_res:
         # TODO: resize images using INTER_AREA (cv2)
@@ -233,6 +251,14 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False):
         for i in range(imgs.shape[0])
     ]
     imgs = torch.stack(imgs, 0)
+
+    depths = [
+        torch.from_numpy(
+            cv2.resize(depths[i], dsize=(W, H), interpolation=cv2.INTER_NEAREST)
+        )
+        for i in range(depths.shape[0])
+    ]
+    depths = torch.stack(depths, 0)
         #TODO for grayscale images manually expand one dimension
         # imgs = imgs.unsqueeze(-1).repeat(1,1,1,3)
 
@@ -243,4 +269,4 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False):
     #print(poses.shape)
     #assert 1==0
 
-    return imgs, poses, render_poses, [H, W, focal], i_split, intrinsics
+    return imgs, poses, render_poses, [H, W, focal], i_split, intrinsics, depths

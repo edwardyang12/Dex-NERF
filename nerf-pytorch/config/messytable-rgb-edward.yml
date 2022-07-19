@@ -1,13 +1,13 @@
 # Parameters to setup experiment.
 experiment:
   # Unique experiment identifier
-  id: messytable-rgb
+  id: messytable-rgb-nerf-larger
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: /jianyu-fast-vol/eval/nerf_obj
+  logdir: ../logs
   # Seed for random number generators (for repeatability).
   randomseed: 42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 1000000
+  train_iters: 100000
   # Number of training iterations after which to validate.
   validate_every: 1000
   # Number of training iterations after which to checkpoint.
@@ -20,10 +20,7 @@ dataset:
   # Type of dataset (Blender vs LLFF vs DeepVoxels vs something else)
   type: blender
   # Base directory of dataset.
-  basedir: /jianyu-fast-vol/data/nerf_data
-  # Optionally, provide a path to the pre-cached dataset dir. This
-  # overrides the other dataset options.
-  cachedir: /jianyu-fast-vol/data/cache
+  basedir: /edward-slow-vol/transparent-reprojection/messytable_rgb/
   # For the Blender datasets (synthetic), optionally return images
   # at half the original resolution of 800 x 800, to save space.
   half_res: True
@@ -33,7 +30,7 @@ dataset:
   # synthetic (Blender) datasets.
   no_ndc: True
   # Near clip plane (clip all depth values closer than this threshold).
-  near: 2
+  near: 1
   # Far clip plane (clip all depth values farther than this threshold).
   far: 6
 
@@ -108,7 +105,7 @@ optimizer:
   type: Adam
   # Learning rate.
   lr: 5.0E-3
- 
+
 # Learning rate schedule.
 scheduler:
   # Exponentially decay learning rate (in 1000 steps)
@@ -128,16 +125,16 @@ nerf:
   train:
     # Number of random rays to retain from each image.
     # These sampled rays are used for training, and the others are discarded.
-    num_random_rays: 1024  # 32 * 32 * 4
+    num_random_rays: 4096  # 32 * 32 * 4
     # Size of each chunk (rays are batched into "chunks" and passed through
     # the network)
     chunksize: 131072  # 131072  # 1024 * 32
     # Whether or not to perturb the sampled depth values.
     perturb: True
     # Number of depth samples per ray for the coarse network.
-    num_coarse: 64
+    num_coarse: 128
     # Number of depth samples per ray for the fine network.
-    num_fine: 64
+    num_fine: 192
     # Whether to render models using a white background.
     white_background: False
     # Standard deviation of noise to be added to the radiance field when
@@ -145,7 +142,6 @@ nerf:
     radiance_field_noise_std: 0.2
     # Sample linearly in disparity space, as opposed to in depth space.
     lindisp: False
-    m_thres: 15
   # Validation-specific parameters.
   validation:
     # Number of random rays to retain from each image.
@@ -154,9 +150,9 @@ nerf:
     # Whether or not to perturb the sampled depth values.
     perturb: False
     # Number of depth samples per ray for the coarse network.
-    num_coarse: 64
+    num_coarse: 128
     # Number of depth samples per ray for the fine network.
-    num_fine: 64
+    num_fine: 192
     # Whether to render models using a white background.
     white_background: False
     # Standard deviation of noise to be added to the radiance field when
@@ -164,4 +160,3 @@ nerf:
     radiance_field_noise_std: 0.
     # Sample linearly in disparity space, as opposed to in depth space.
     lindisp: False
-    m_thres: 15
