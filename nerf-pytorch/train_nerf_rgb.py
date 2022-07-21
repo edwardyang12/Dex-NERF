@@ -9,10 +9,12 @@ import torchvision
 import yaml
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
+import torchvision.utils as vutils
+from PIL import Image
 
 from nerf import (CfgNode, get_embedding_function, get_ray_bundle, img2mse,
                   load_blender_data, load_llff_data, meshgrid_xy, models,
-                  mse2psnr, run_one_iter_of_nerf)
+                  mse2psnr, run_one_iter_of_nerf, load_messytable_data)
 
 
 def main():
@@ -53,15 +55,14 @@ def main():
         # Load dataset
         images, poses, render_poses, hwf = None, None, None, None
         if cfg.dataset.type.lower() == "blender":
-            images, poses, render_poses, hwf, i_split = load_blender_data(
+            images, poses, render_poses, hwf, i_split, intrinsics, depths = load_messytable_data(
                 cfg.dataset.basedir,
                 half_res=cfg.dataset.half_res,
                 testskip=cfg.dataset.testskip,
             )
             i_train, i_val, i_test = i_split
-            H, W, focal = hwf
+            H, W, _ = hwf
             H, W = int(H), int(W)
-            hwf = [H, W, focal]
             if cfg.nerf.train.white_background:
                 images = images[..., :3] * images[..., -1:] + (1.0 - images[..., -1:])
         elif cfg.dataset.type.lower() == "llff":
@@ -69,7 +70,7 @@ def main():
                 cfg.dataset.basedir, factor=cfg.dataset.downsample_factor
             )
             hwf = poses[0, :3, -1]
-            poses = poses[:, :3, :4]
+            poses = poses[:, :, :]
             if not isinstance(i_test, list):
                 i_test = [i_test]
             if cfg.dataset.llffhold > 0:
@@ -145,6 +146,11 @@ def main():
     # Setup logging.
     logdir = os.path.join(cfg.experiment.logdir, cfg.experiment.id)
     os.makedirs(logdir, exist_ok=True)
+    m_thres_max = cfg.nerf.validation.m_thres
+    m_thres_cand = np.arange(5,m_thres_max+5,5)
+    for i in m_thres_cand:
+        os.makedirs(os.path.join(logdir,"m_"+str(i)), exist_ok=True)
+
     writer = SummaryWriter(logdir)
     # Write out config parameters.
     with open(os.path.join(logdir, "config.yml"), "w") as f:
@@ -168,7 +174,7 @@ def main():
 
         model_coarse.train()
         if model_fine:
-            model_coarse.train()
+            model_fine.train()
 
         rgb_coarse, rgb_fine = None, None
         target_ray_values = None
@@ -193,7 +199,8 @@ def main():
             target_ray_values = target_ray_values[select_inds].to(device)
             # ray_bundle = torch.stack([ray_origins, ray_directions], dim=0).to(device)
 
-            rgb_coarse, _, _, rgb_fine, _, _ = run_one_iter_of_nerf(
+            #rgb_coarse, _, _, rgb_fine, _, _,_
+            nerf_out = run_one_iter_of_nerf(
                 cache_dict["height"],
                 cache_dict["width"],
                 cache_dict["focal_length"],
@@ -205,12 +212,22 @@ def main():
                 mode="train",
                 encode_position_fn=encode_position_fn,
                 encode_direction_fn=encode_direction_fn,
+                m_thres_cand=m_thres_cand
             )
+            rgb_coarse, rgb_fine = nerf_out[0], nerf_out[3]
         else:
             img_idx = np.random.choice(i_train)
             img_target = images[img_idx].to(device)
-            pose_target = poses[img_idx, :3, :4].to(device)
-            ray_origins, ray_directions = get_ray_bundle(H, W, focal, pose_target)
+            pose_target = poses[img_idx, :, :].to(device)
+            #print("===========================================")
+            #print(pose_target)
+
+            #print(pose_target.shape)
+            intrinsic_target = intrinsics[img_idx,:,:].to(device)
+            #print(intrinsic_target)
+            #print(img_idx)
+            #print("===========================================")
+            ray_origins, ray_directions = get_ray_bundle(H, W, focal, pose_target, intrinsic_target)
             coords = torch.stack(
                 meshgrid_xy(torch.arange(H).to(device), torch.arange(W).to(device)),
                 dim=-1,
@@ -221,7 +238,9 @@ def main():
             )
             select_inds = coords[select_inds]
             ray_origins = ray_origins[select_inds[:, 0], select_inds[:, 1], :]
+            #print(ray_directions.shape)
             ray_directions = ray_directions[select_inds[:, 0], select_inds[:, 1], :]
+            #print(ray_directions.shape)
             # batch_rays = torch.stack([ray_origins, ray_directions], dim=0)
             #print(img_target.shape)
             
@@ -231,10 +250,11 @@ def main():
             then = time.time()
             #print(ray_origins.shape, ray_directions.shape)
             #print(ray_origins[-3:,:], ray_directions[-3:,:])
-            rgb_coarse, _, _, rgb_fine, _, _ = run_one_iter_of_nerf(
+            #rgb_coarse, _, _, rgb_fine, _, _, _
+            nerf_out = run_one_iter_of_nerf(
                 H,
                 W,
-                focal,
+                intrinsic_target[0,0],
                 model_coarse,
                 model_fine,
                 ray_origins,
@@ -243,27 +263,25 @@ def main():
                 mode="train",
                 encode_position_fn=encode_position_fn,
                 encode_direction_fn=encode_direction_fn,
+                m_thres_cand=m_thres_cand
             )
-            rgb_coarse = torch.mean(rgb_coarse, dim=-1)
-            rgb_fine = torch.mean(rgb_fine, dim=-1)
+            rgb_coarse, rgb_fine = nerf_out[0], nerf_out[3]
+            #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
+            #rgb_fine = torch.mean(rgb_fine, dim=-1)
             #print(rgb_coarse.shape, rgb_fine.shape)
             target_ray_values = target_s
             #assert 1==0
         
-        #coarse_loss = torch.nn.functional.mse_loss(
-        #    rgb_coarse[..., :3], target_ray_values[..., :3]
-        #)
         coarse_loss = torch.nn.functional.mse_loss(
-            rgb_coarse, target_ray_values
+            rgb_coarse[..., :3], target_ray_values[..., :3]
         )
+       
         fine_loss = None
         if rgb_fine is not None:
-            #fine_loss = torch.nn.functional.mse_loss(
-            #    rgb_fine[..., :3], target_ray_values[..., :3]
-            #)
             fine_loss = torch.nn.functional.mse_loss(
-                rgb_fine, target_ray_values
+                rgb_fine[..., :3], target_ray_values[..., :3]
             )
+            
         # loss = torch.nn.functional.mse_loss(rgb_pred[..., :3], target_s[..., :3])
         loss = 0.0
         # if fine_loss is not None:
@@ -316,7 +334,8 @@ def main():
                 if USE_CACHED_DATASET:
                     datafile = np.random.choice(validation_paths)
                     cache_dict = torch.load(datafile)
-                    rgb_coarse, _, _, rgb_fine, _, _ = run_one_iter_of_nerf(
+                    #rgb_coarse, _, _, rgb_fine, _, _ ,_
+                    nerf_out = run_one_iter_of_nerf(
                         cache_dict["height"],
                         cache_dict["width"],
                         cache_dict["focal_length"],
@@ -328,19 +347,24 @@ def main():
                         mode="validation",
                         encode_position_fn=encode_position_fn,
                         encode_direction_fn=encode_direction_fn,
+                        m_thres_cand=m_thres_cand
                     )
+                    rgb_coarse, rgb_fine = nerf_out[0], nerf_out[3]
                     target_ray_values = cache_dict["target"].to(device)
                 else:
                     img_idx = np.random.choice(i_val)
                     img_target = images[img_idx].to(device)
-                    pose_target = poses[img_idx, :3, :4].to(device)
+                    pose_target = poses[img_idx, :, :].to(device)
+                    depth_target = depths[img_idx].to(device)
+                    intrinsic_target = intrinsics[img_idx,:,:].to(device)
                     ray_origins, ray_directions = get_ray_bundle(
-                        H, W, focal, pose_target
+                        H, W, focal, pose_target, intrinsic_target
                     )
-                    rgb_coarse, _, _, rgb_fine, _, _ = run_one_iter_of_nerf(
+                    #rgb_coarse, _, _, rgb_fine, _, _ ,depth_fine_dex
+                    nerf_out = run_one_iter_of_nerf(
                         H,
                         W,
-                        focal,
+                        intrinsic_target[0,0],
                         model_coarse,
                         model_fine,
                         ray_origins,
@@ -349,12 +373,16 @@ def main():
                         mode="validation",
                         encode_position_fn=encode_position_fn,
                         encode_direction_fn=encode_direction_fn,
+                        m_thres_cand=m_thres_cand
                     )
+                    rgb_coarse, rgb_fine = nerf_out[0], nerf_out[3]
+                    depth_fine_dex = list(nerf_out[6:])
                     target_ray_values = img_target
-                    rgb_coarse = torch.mean(rgb_coarse, dim=-1)
-                    rgb_fine = torch.mean(rgb_fine, dim=-1)
+                    #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
+                    #rgb_fine = torch.mean(rgb_fine, dim=-1)
                 #print(target_ray_values.shape, rgb_coarse.shape)
                 #assert 1==0
+                #print(depth_fine_dex.shape)
                 coarse_loss = img2mse(rgb_coarse[..., :3], target_ray_values[..., :3])
                 loss, fine_loss = 0.0, 0.0
                 if rgb_fine is not None:
@@ -378,6 +406,23 @@ def main():
                 writer.add_image(
                     "validation/img_target",
                     cast_to_image(target_ray_values[..., :3]),
+                    i,
+                )
+                for cand in range(m_thres_cand.shape[0]):
+                    writer.add_image(
+                        "validation/depth_pred_"+str(m_thres_cand[cand]),
+                        vutils.make_grid(depth_fine_dex[cand], padding=0, nrow=1, normalize=True, scale_each=True),
+                        i,
+                    )
+                    pred_depth_np = depth_fine_dex[cand].detach().cpu().numpy()
+                    pred_depth_np = pred_depth_np*1000
+                    pred_depth_np = (pred_depth_np).astype(np.uint32)
+                    out_pred_depth = Image.fromarray(pred_depth_np, mode='I')
+                    out_pred_depth.save(os.path.join(logdir,"m_"+str(m_thres_cand[cand]),"pred_depth_step_"+str(i)+".png"))
+                    #print(depth_fine_dex[cand].shape)
+                writer.add_image(
+                    "validation/depth_gt",
+                    vutils.make_grid(depth_target, padding=0, nrow=1, normalize=True, scale_each=True),
                     i,
                 )
                 tqdm.write(

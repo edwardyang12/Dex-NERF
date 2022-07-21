@@ -33,8 +33,10 @@ def predict_and_render_radiance(
     mode="train",
     encode_position_fn=None,
     encode_direction_fn=None,
+    m_thres_cand=None
 ):
     # TESTED
+    #print(ray_batch.shape)
     num_rays = ray_batch.shape[0]
     ro, rd = ray_batch[..., :3], ray_batch[..., 3:6]
     bounds = ray_batch[..., 6:8].view((-1, 1, 2))
@@ -50,10 +52,12 @@ def predict_and_render_radiance(
         device=ro.device,
     )
     if not getattr(options.nerf, mode).lindisp:
+        #print("enter")
         z_vals = near * (1.0 - t_vals) + far * t_vals
     else:
         z_vals = 1.0 / (1.0 / near * (1.0 - t_vals) + 1.0 / far * t_vals)
     z_vals = z_vals.expand([num_rays, getattr(options.nerf, mode).num_coarse])
+    
 
     if getattr(options.nerf, mode).perturb:
         # Get intervals between samples.
@@ -64,6 +68,7 @@ def predict_and_render_radiance(
         t_rand = torch.rand(z_vals.shape, dtype=ro.dtype, device=ro.device)
         z_vals = lower + (upper - lower) * t_rand
     # pts -> (num_rays, N_samples, 3)
+    #print(z_vals.shape)
     pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
 
     radiance_field = run_network(
@@ -74,20 +79,18 @@ def predict_and_render_radiance(
         encode_position_fn,
         encode_direction_fn,
     )
+    #print(radiance_field.shape)
 
-    (
-        rgb_coarse,
-        disp_coarse,
-        acc_coarse,
-        weights,
-        depth_coarse,
-    ) = volume_render_radiance_field(
+    coarse_out = volume_render_radiance_field(
         radiance_field,
         z_vals,
         rd,
         radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
         white_background=getattr(options.nerf, mode).white_background,
+        m_thres_cand=m_thres_cand
     )
+    rgb_coarse, disp_coarse, acc_coarse, weights, depth_coarse = coarse_out[0], coarse_out[1], coarse_out[2], coarse_out[3], coarse_out[4]
+    depth_coarse_dex = list(coarse_out[5:])
 
     rgb_fine, disp_fine, acc_fine = None, None, None
     if getattr(options.nerf, mode).num_fine > 0:
@@ -101,8 +104,11 @@ def predict_and_render_radiance(
             det=(getattr(options.nerf, mode).perturb == 0.0),
         )
         z_samples = z_samples.detach()
+        #print(z_samples[0,:])
 
         z_vals, _ = torch.sort(torch.cat((z_vals, z_samples), dim=-1), dim=-1)
+        
+        #print(z_samples[0,:])
         # pts -> (N_rays, N_samples + N_importance, 3)
         pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
 
@@ -114,7 +120,8 @@ def predict_and_render_radiance(
             encode_position_fn,
             encode_direction_fn,
         )
-        rgb_fine, disp_fine, acc_fine, _, _ = volume_render_radiance_field(
+        #rgb_fine, disp_fine, acc_fine, _, _, depth_fine_dex 
+        fine_out = volume_render_radiance_field(
             radiance_field,
             z_vals,
             rd,
@@ -122,9 +129,13 @@ def predict_and_render_radiance(
                 options.nerf, mode
             ).radiance_field_noise_std,
             white_background=getattr(options.nerf, mode).white_background,
+            m_thres_cand=m_thres_cand
         )
-
-    return rgb_coarse, disp_coarse, acc_coarse, rgb_fine, disp_fine, acc_fine
+        rgb_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2]
+        depth_fine_dex = list(fine_out[5:])
+    #print(acc_fine.shape)
+    out = [rgb_coarse, disp_coarse, acc_coarse, rgb_fine, disp_fine, acc_fine] + depth_fine_dex
+    return tuple(out)
 
 
 def run_one_iter_of_nerf(
@@ -139,8 +150,11 @@ def run_one_iter_of_nerf(
     mode="train",
     encode_position_fn=None,
     encode_direction_fn=None,
+    m_thres_cand=None
 ):
     viewdirs = None
+    #print(ray_directions.shape, ray_origins.shape)
+    
     if options.nerf.use_viewdirs:
         # Provide ray directions as input
         viewdirs = ray_directions
@@ -154,8 +168,11 @@ def run_one_iter_of_nerf(
     ]
     if model_fine:
         restore_shapes += restore_shapes
-        restore_shapes += restore_shapes
+        for i in m_thres_cand:
+            restore_shapes += [ray_directions.shape[:-1]]
+    #print(len(restore_shapes), ray_directions.shape[:-1])
     if options.dataset.no_ndc is False:
+        #print("no_ndc")
         ro, rd = ndc_rays(height, width, focal_length, 1.0, ray_origins, ray_directions)
         ro = ro.view((-1, 3))
         rd = rd.view((-1, 3))
@@ -175,16 +192,20 @@ def run_one_iter_of_nerf(
             model_coarse,
             model_fine,
             options,
+            mode=mode,
             encode_position_fn=encode_position_fn,
             encode_direction_fn=encode_direction_fn,
+            m_thres_cand=m_thres_cand
         )
         for batch in batches
     ]
+    #assert 1==0
     synthesized_images = list(zip(*pred))
     synthesized_images = [
         torch.cat(image, dim=0) if image[0] is not None else (None)
         for image in synthesized_images
     ]
+    #print(len(synthesized_images), len(restore_shapes))
     if mode == "validation":
         synthesized_images = [
             image.view(shape) if image is not None else None
