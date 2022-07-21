@@ -1,9 +1,9 @@
 # Parameters to setup experiment.
 experiment:
   # Unique experiment identifier
-  id: messytable-rgb-nerf-fixed
+  id: messytable-rgb-dex-larger
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: ../logs
+  logdir: /edward-slow-vol/transparent-reprojection/logs/
   # Seed for random number generators (for repeatability).
   randomseed: 42  # Cause, why not?
   # Number of training iterations.
