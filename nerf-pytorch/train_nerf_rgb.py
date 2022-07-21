@@ -59,6 +59,7 @@ def main():
                 cfg.dataset.basedir,
                 half_res=cfg.dataset.half_res,
                 testskip=cfg.dataset.testskip,
+                imgname=cfg.dataset.imgname
             )
             i_train, i_val, i_test = i_split
             H, W, _ = hwf
@@ -383,6 +384,7 @@ def main():
                 #print(target_ray_values.shape, rgb_coarse.shape)
                 #assert 1==0
                 #print(depth_fine_dex.shape)
+                #print(rgb_coarse.shape, target_ray_values.shape)
                 coarse_loss = img2mse(rgb_coarse[..., :3], target_ray_values[..., :3])
                 loss, fine_loss = 0.0, 0.0
                 if rgb_fine is not None:

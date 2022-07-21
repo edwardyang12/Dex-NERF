@@ -131,7 +131,7 @@ def load_pickle(filename):
         return pickle.load(f)
 
 
-def load_messytable_data(basedir, half_res=False, testskip=1, debug=False):
+def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgname="0128_irL_kuafu_half.png"):
     splits = ["train", "val", "test"]
     metas = {}
     #for s in splits:
@@ -160,11 +160,19 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False):
                 skip = testskip
 
             #for frame in meta["frames"][::skip]:
-            fname = os.path.join(path, prefix, "0128_rgbL_kuafu.png")
+            fname = os.path.join(path, prefix, imgname)
             gt_depth_fname = os.path.join(path, prefix, "depthL.png")
             #testimg = np.array(imageio.imread(fname))
             #print(testimg.shape, np.max(testimg), np.min(testimg))
-            imgs.append(imageio.imread(fname))
+            cur_img = imageio.imread(fname)
+            if len(cur_img.shape) != 3:
+                cur_img = np.array(cur_img)[...,None]
+                cur_img = np.concatenate((cur_img, cur_img, cur_img), axis=-1)
+                #print(cur_img.shape)
+            H,W = cur_img.shape[:2]
+            #print(cur_img.shape)
+            #assert 1==0
+            imgs.append(cur_img)
             depths.append(np.array(Image.open(gt_depth_fname))/1000)
             poses.append(np.array(meta["extrinsic_l"]))
             if half_res:
@@ -237,9 +245,13 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False):
 
     if half_res:
         # TODO: resize images using INTER_AREA (cv2)
-        H = H // 4
-        W = W // 4
+        H = 270
+        W = 480
         focal = focal / 4.0
+        #print(H,W)
+    else:
+        H = 1080
+        W = 1920
         
     # H = H // 4
     # W = W // 4
