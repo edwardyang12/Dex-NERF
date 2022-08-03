@@ -12,6 +12,8 @@ from tqdm import tqdm, trange
 import torchvision.utils as vutils
 from PIL import Image
 
+from nerf import compute_err_metric, depth_error_img
+
 from nerf import (CfgNode, get_embedding_function, get_ray_bundle, img2mse,
                   load_blender_data, load_llff_data, meshgrid_xy, models,
                   mse2psnr, run_one_iter_of_nerf, load_messytable_data)
@@ -147,10 +149,10 @@ def main():
     # Setup logging.
     logdir = os.path.join(cfg.experiment.logdir, cfg.experiment.id)
     os.makedirs(logdir, exist_ok=True)
+    
     m_thres_max = cfg.nerf.validation.m_thres
     m_thres_cand = np.arange(5,m_thres_max+5,5)
-    for i in m_thres_cand:
-        os.makedirs(os.path.join(logdir,"m_"+str(i)), exist_ok=True)
+    os.makedirs(os.path.join(logdir,"pred_depth"), exist_ok=True)
 
     writer = SummaryWriter(logdir)
     # Write out config parameters.
@@ -405,22 +407,49 @@ def main():
                         "validation/rgb_fine", cast_to_image(rgb_fine[..., :3]), i
                     )
                     writer.add_scalar("validation/fine_loss", fine_loss.item(), i)
+                #print(cast_to_image(target_ray_values[..., :3]).shape, type(cast_to_image(target_ray_values[..., :3])))
                 writer.add_image(
                     "validation/img_target",
                     cast_to_image(target_ray_values[..., :3]),
                     i,
                 )
+                gt_depth_torch = depth_target.cpu()
+                img_ground_mask = (gt_depth_torch > 0) & (gt_depth_torch < 1.25)
+                min_err = None
+                min_abs_err = 1000.
+                min_abs_depth = None
                 for cand in range(m_thres_cand.shape[0]):
                     writer.add_image(
                         "validation/depth_pred_"+str(m_thres_cand[cand]),
                         vutils.make_grid(depth_fine_dex[cand], padding=0, nrow=1, normalize=True, scale_each=True),
                         i,
                     )
-                    pred_depth_np = depth_fine_dex[cand].detach().cpu().numpy()
-                    pred_depth_np = pred_depth_np*1000
-                    pred_depth_np = (pred_depth_np).astype(np.uint32)
-                    out_pred_depth = Image.fromarray(pred_depth_np, mode='I')
-                    out_pred_depth.save(os.path.join(logdir,"m_"+str(m_thres_cand[cand]),"pred_depth_step_"+str(i)+".png"))
+                
+                    pred_depth_torch = depth_fine_dex[cand].detach().cpu()
+                    
+                    #print(gt_depth_torch.shape, pred_depth_torch.shape, img_ground_mask.shape)
+                    #assert 1==0
+                    err = compute_err_metric(gt_depth_torch, pred_depth_torch, img_ground_mask)
+                    if err['depth_abs_err'] < min_abs_err:
+                        min_abs_err = err['depth_abs_err']
+                        min_err = err
+                        min_abs_depth = pred_depth_torch
+                    
+                pred_depth_np = min_abs_depth.numpy()
+                pred_depth_np = pred_depth_np*1000
+                pred_depth_np = (pred_depth_np).astype(np.uint32)
+                out_pred_depth = Image.fromarray(pred_depth_np, mode='I')
+                out_pred_depth.save(os.path.join(logdir,"pred_depth","pred_depth_step_"+str(i)+".png"))
+
+                pred_depth_err_np = depth_error_img((min_abs_depth.unsqueeze(0))*1000, (gt_depth_torch.unsqueeze(0))*1000, img_ground_mask.unsqueeze(0))
+                print(pred_depth_err_np.transpose((1,2,0)).shape)
+                writer.add_image(
+                        "validation/depth_pred_err",
+                        pred_depth_err_np.transpose((2,0,1)),
+                        i,
+                    )
+
+
                     #print(depth_fine_dex[cand].shape)
                 writer.add_image(
                     "validation/depth_gt",
@@ -434,6 +463,10 @@ def main():
                     + str(psnr)
                     + " Time: "
                     + str(time.time() - start)
+                    + " Abs Err: "
+                    + str(min_abs_err)
+                    + " Err4: "
+                    + str(min_err['depth_err4'])
                 )
 
         if i % cfg.experiment.save_every == 0 or i == cfg.experiment.train_iters - 1:

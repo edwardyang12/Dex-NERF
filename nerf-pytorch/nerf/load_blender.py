@@ -143,6 +143,15 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
     all_intrinsics = []
     all_depths = []
     counts = [0]
+    is_real_rgb = True
+    if is_real_rgb:
+        depth_n = "depth.png"
+        extri_n = "extrinsic"
+        intri_n = "intrinsic"
+    else:
+        depth_n = "depthL.png"
+        extri_n = "extrinsic_l"
+        intri_n = "intrinsic_l"
     for s in splits:
         path = os.path.join(basedir, s)
         imgs = []
@@ -161,7 +170,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
 
             #for frame in meta["frames"][::skip]:
             fname = os.path.join(path, prefix, imgname)
-            gt_depth_fname = os.path.join(path, prefix, "depthL.png")
+            gt_depth_fname = os.path.join(path, prefix, depth_n)
             #testimg = np.array(imageio.imread(fname))
             #print(testimg.shape, np.max(testimg), np.min(testimg))
             cur_img = imageio.imread(fname)
@@ -174,15 +183,15 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
             #assert 1==0
             imgs.append(cur_img)
             depths.append(np.array(Image.open(gt_depth_fname))/1000)
-            poses.append(np.array(meta["extrinsic_l"]))
+            poses.append(np.array(meta[extri_n]))
             if half_res:
-                intrinsics_c = np.array(meta['intrinsic_l'])
+                intrinsics_c = np.array(meta[intri_n])
                 intrinsics_c[:2,:] = intrinsics_c[:2,:]/4
                 intrinsics_c[0,2] = 240.
                 intrinsics_c[1,2] = 135.
                 intrinsics.append(intrinsics_c)
             else:
-                intrinsics.append(np.array(meta['intrinsic_l']))
+                intrinsics.append(np.array(meta[intri_n]))
             
             
             #print(imgs.shape)
@@ -208,7 +217,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
 
     H, W = imgs[0].shape[:2]
     #camera_angle_x = float(meta["camera_angle_x"])
-    focal = meta['intrinsic_l'][0,0]
+    focal = meta[intri_n][0,0]
 
     render_poses = torch.stack(
         [
