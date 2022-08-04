@@ -7,14 +7,14 @@ import numpy as np
 import torch
 import pickle
 from PIL import Image
-from load_blender import pose_spherical
+from .load_blender import pose_spherical
 
 def load_pickle(filename):
     with open(filename, 'rb') as f:
         return pickle.load(f)
 
 
-def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgname="0128_irL_kuafu_half.png"):
+def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgname="0128_irL_kuafu_half.png", is_real_rgb=False):
     splits = ["train", "val", "test"]
     metas = {}
     #for s in splits:
@@ -26,7 +26,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
     all_intrinsics = []
     all_depths = []
     counts = [0]
-    is_real_rgb = True
+
     if is_real_rgb:
         depth_n = "depth.png"
         extri_n = "extrinsic"
@@ -135,19 +135,19 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
         intrinsics = torch.from_numpy(intrinsics)
         return imgs, poses, render_poses, [H, W, focal], i_split, intrinsics, depths
 
-    if half_res:
-        # TODO: resize images using INTER_AREA (cv2)
-        H = 270
-        W = 480
-        focal = focal / 4.0
-        #print(H,W)
-    else:
-        H = 1080
-        W = 1920
+    # if half_res:
+    #     # TODO: resize images using INTER_AREA (cv2)
+    #     H = 270
+    #     W = 480
+    #     focal = focal / 4.0
+    #     #print(H,W)
+    # else:
+    #     H = 1080
+    #     W = 1920
 
-    # H = H // 4
-    # W = W // 4
-    # focal = focal / 4.0
+    H = H // 4
+    W = W // 4
+    focal = focal / 4.0
     imgs = [
         torch.from_numpy(
             cv2.resize(imgs[i], dsize=(W, H), interpolation=cv2.INTER_AREA)

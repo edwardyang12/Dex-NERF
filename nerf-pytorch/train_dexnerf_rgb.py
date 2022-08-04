@@ -413,7 +413,6 @@ def main():
                 out_pred_depth = Image.fromarray(pred_depth_np, mode='I')
                 out_pred_depth.save(os.path.join(logdir,"pred_depth","pred_depth_step_"+str(i)+".png"))
                 pred_depth_err_np = depth_error_img((min_abs_depth.unsqueeze(0))*1000, (gt_depth_torch.unsqueeze(0))*1000, img_ground_mask.unsqueeze(0))
-                print(pred_depth_err_np.transpose((1,2,0)).shape)
                 writer.add_image(
                         "validation/depth_pred_err",
                         pred_depth_err_np.transpose((2,0,1)),
@@ -425,6 +424,8 @@ def main():
                     vutils.make_grid(depth_target, padding=0, nrow=1, normalize=True, scale_each=True),
                     i,
                 )
+                writer.add_scalar("validation/min_abs_err", min_abs_err, i)
+                writer.add_scalar("validation/err4", min_err['depth_err4'], i)
                 tqdm.write(
                     "Validation loss: "
                     + str(loss.item())
