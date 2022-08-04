@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import pickle
 from PIL import Image
-from .load_blender import pose_spherical
+from load_blender import pose_spherical
 
 def load_pickle(filename):
     with open(filename, 'rb') as f:

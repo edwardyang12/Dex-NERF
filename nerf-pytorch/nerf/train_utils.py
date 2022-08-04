@@ -195,10 +195,10 @@ def predict_and_render_radiance(
             white_background=getattr(options.nerf, mode).white_background,
             m_thres_cand=m_thres_cand
         )
-        rgb_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2]
+        rgb_fine, disp_fine, acc_fine, depth_fine = fine_out[0], fine_out[1], fine_out[2], fine_out[4]
         depth_fine_dex = list(fine_out[5:])
     #print(acc_fine.shape)
-    out = [rgb_coarse, disp_coarse, acc_coarse, rgb_fine, disp_fine, acc_fine] + depth_fine_dex
+    out = [rgb_coarse, depth_coarse, acc_coarse, rgb_fine, depth_fine, acc_fine] + depth_fine_dex
     return tuple(out)
 
 

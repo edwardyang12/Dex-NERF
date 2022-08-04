@@ -19,7 +19,7 @@ from nerf import (CfgNode, get_embedding_function, get_ray_bundle, img2mse,
                   mse2psnr, run_one_iter_of_nerf, load_messytable_data)
 
 
-# for training nerf
+# for training dexnerf
 def main():
 
     parser = argparse.ArgumentParser()
@@ -202,6 +202,7 @@ def main():
                 ray_directions[select_inds],
             )
             target_ray_values = target_ray_values[select_inds].to(device)
+            # ray_bundle = torch.stack([ray_origins, ray_directions], dim=0).to(device)
 
             nerf_out = run_one_iter_of_nerf(
                 cache_dict["height"],
@@ -257,6 +258,7 @@ def main():
                 m_thres_cand=m_thres_cand
             )
             rgb_coarse, rgb_fine = nerf_out[0], nerf_out[3]
+
             target_ray_values = target_s
 
         coarse_loss = torch.nn.functional.mse_loss(
@@ -271,6 +273,7 @@ def main():
 
         # loss = torch.nn.functional.mse_loss(rgb_pred[..., :3], target_s[..., :3])
         loss = 0.0
+
         loss = coarse_loss + (fine_loss if fine_loss is not None else 0.0)
         loss.backward()
         psnr = mse2psnr(loss.item())
@@ -317,7 +320,6 @@ def main():
                 if USE_CACHED_DATASET:
                     datafile = np.random.choice(validation_paths)
                     cache_dict = torch.load(datafile)
-                    #rgb_coarse, _, _, rgb_fine, _, _ ,_
                     nerf_out = run_one_iter_of_nerf(
                         cache_dict["height"],
                         cache_dict["width"],
@@ -343,7 +345,6 @@ def main():
                     ray_origins, ray_directions = get_ray_bundle(
                         H, W, focal, pose_target, intrinsic_target
                     )
-                    #rgb_coarse, _, _, rgb_fine, _, _ ,depth_fine_dex
                     nerf_out = run_one_iter_of_nerf(
                         H,
                         W,
@@ -359,7 +360,7 @@ def main():
                         m_thres_cand=m_thres_cand
                     )
                     rgb_coarse, rgb_fine = nerf_out[0], nerf_out[3]
-                    depth_pred = nerf_out[4]
+                    depth_fine_dex = list(nerf_out[6:])
                     target_ray_values = img_target
 
                 coarse_loss = img2mse(rgb_coarse[..., :3], target_ray_values[..., :3])
@@ -389,11 +390,24 @@ def main():
                 )
                 gt_depth_torch = depth_target.cpu()
                 img_ground_mask = (gt_depth_torch > 0) & (gt_depth_torch < 1.25)
+                min_err = None
+                min_abs_err = 1000.
+                min_abs_depth = None
+                for cand in range(m_thres_cand.shape[0]):
+                    writer.add_image(
+                        "validation/depth_pred_"+str(m_thres_cand[cand]),
+                        vutils.make_grid(depth_fine_dex[cand], padding=0, nrow=1, normalize=True, scale_each=True),
+                        i,
+                    )
+                    pred_depth_torch = depth_fine_dex[cand].detach().cpu()
 
-                pred_depth_torch = depth_pred.detach().cpu()
+                    err = compute_err_metric(gt_depth_torch, pred_depth_torch, img_ground_mask)
+                    if err['depth_abs_err'] < min_abs_err:
+                        min_abs_err = err['depth_abs_err']
+                        min_err = err
+                        min_abs_depth = pred_depth_torch
 
-                err = compute_err_metric(gt_depth_torch, pred_depth_torch, img_ground_mask)
-                pred_depth_np = pred_depth_torch.numpy()
+                pred_depth_np = min_abs_depth.numpy()
                 pred_depth_np = pred_depth_np*1000
                 pred_depth_np = (pred_depth_np).astype(np.uint32)
                 out_pred_depth = Image.fromarray(pred_depth_np, mode='I')

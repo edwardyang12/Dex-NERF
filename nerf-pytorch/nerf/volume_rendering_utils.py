@@ -44,8 +44,9 @@ def volume_render_radiance_field(
 
     rgb_map = weights[..., None] * rgb
     rgb_map = rgb_map.sum(dim=-2)
-    #print(depth_values[0,:])
+
     depth_map = weights * depth_values
+    depth_map = depth_map.sum(dim=-1)
 
     depth_map_dex = []
 
@@ -55,11 +56,8 @@ def volume_render_radiance_field(
         depth_ind = torch.argmax(thres_out, dim=-1)
         n_ind = torch.arange(depth_ind.shape[0])
         depth_map_dex.append(depth_values[n_ind, depth_ind])
-    
-    depth_map = depth_map.sum(dim=-1)
-    #print(depth_values.shape, sigma_a.shape, depth_ind.shape, depth_map.shape, depth_map_dex.shape)
-    # depth_map = (weights * depth_values).sum(dim=-1)
-    #print(weights.shape)
+
+
     acc_map = weights.sum(dim=-1)
     disp_map = 1.0 / torch.max(1e-10 * torch.ones_like(depth_map), depth_map / acc_map)
 
