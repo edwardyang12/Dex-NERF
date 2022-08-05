@@ -107,9 +107,11 @@ def get_ray_bundle(
         directions[..., None, :] * torch.inverse(tform_cam2world[:3, :3]), dim=-1
     )
     ray_origins = torch.inverse(tform_cam2world)[:3, -1].expand(ray_directions.shape)
+    origins = torch.zeros(ray_origins.shape)
+    #print(ray_origins.shape, ray_directions.shape, origins.shape, directions.shape)
     #print(ray_origins[0,0,:])
     #assert 1==0
-    return ray_origins, ray_directions
+    return ray_origins, ray_directions, origins, directions
 
 
 def positional_encoding(

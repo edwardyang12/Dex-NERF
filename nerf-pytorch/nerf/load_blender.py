@@ -131,7 +131,7 @@ def load_pickle(filename):
         return pickle.load(f)
 
 
-def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgname="0128_irL_kuafu_half.png"):
+def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgname="0128_irL_kuafu_half.png", is_real_rgb = False):
     splits = ["train", "val", "test"]
     metas = {}
     #for s in splits:
@@ -142,22 +142,26 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
     all_poses = []
     all_intrinsics = []
     all_depths = []
+    all_labels = []
     counts = [0]
-    is_real_rgb = True
+    #is_real_rgb = False
     if is_real_rgb:
         depth_n = "depth.png"
         extri_n = "extrinsic"
         intri_n = "intrinsic"
+        label_n = "label.png"
     else:
         depth_n = "depthL.png"
         extri_n = "extrinsic_l"
         intri_n = "intrinsic_l"
+        label_n = "labelL.png"
     for s in splits:
         path = os.path.join(basedir, s)
         imgs = []
         poses = []
         intrinsics = []
         depths = []
+        labels = []
         #print(os.listdir(path))
         for prefix in os.listdir(path):
             #print(os.path.join(path, prefix, 'meta.pkl'))
@@ -171,6 +175,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
             #for frame in meta["frames"][::skip]:
             fname = os.path.join(path, prefix, imgname)
             gt_depth_fname = os.path.join(path, prefix, depth_n)
+            label_fname = os.path.join(path, prefix, label_n)
             #testimg = np.array(imageio.imread(fname))
             #print(testimg.shape, np.max(testimg), np.min(testimg))
             cur_img = imageio.imread(fname)
@@ -184,11 +189,12 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
             imgs.append(cur_img)
             depths.append(np.array(Image.open(gt_depth_fname))/1000)
             poses.append(np.array(meta[extri_n]))
+            labels.append(np.array(Image.open(label_fname)))
             if half_res:
                 intrinsics_c = np.array(meta[intri_n])
                 intrinsics_c[:2,:] = intrinsics_c[:2,:]/4
-                intrinsics_c[0,2] = 240.
-                intrinsics_c[1,2] = 135.
+                #intrinsics_c[0,2] = 240.
+                #intrinsics_c[1,2] = 135.
                 intrinsics.append(intrinsics_c)
             else:
                 intrinsics.append(np.array(meta[intri_n]))
@@ -199,6 +205,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
         intrinsics = np.array(intrinsics).astype(np.float32)
         imgs = (np.array(imgs) / 255.0).astype(np.float32)
         depths = np.array(depths).astype(np.float32)
+        labels = np.array(labels).astype(np.float32)
         #print(imgs.shape)
         counts.append(counts[-1] + imgs.shape[0])
         #assert 1==0
@@ -207,6 +214,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
         all_poses.append(poses)
         all_intrinsics.append(intrinsics)
         all_depths.append(depths)
+        all_labels.append(labels)
 
     i_split = [np.arange(counts[i], counts[i + 1]) for i in range(len(splits))]
 
@@ -214,6 +222,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
     poses = np.concatenate(all_poses, 0)
     intrinsics = np.concatenate(all_intrinsics, 0)
     depths = np.concatenate(all_depths,0)
+    labels = np.concatenate(all_labels,0)
 
     H, W = imgs[0].shape[:2]
     #camera_angle_x = float(meta["camera_angle_x"])
@@ -280,6 +289,14 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
         for i in range(depths.shape[0])
     ]
     depths = torch.stack(depths, 0)
+
+    labels = [
+        torch.from_numpy(
+            cv2.resize(labels[i], dsize=(W, H), interpolation=cv2.INTER_NEAREST)
+        )
+        for i in range(labels.shape[0])
+    ]
+    labels = torch.stack(labels, 0)
         #TODO for grayscale images manually expand one dimension
         # imgs = imgs.unsqueeze(-1).repeat(1,1,1,3)
 
@@ -290,4 +307,4 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
     #print(poses.shape)
     #assert 1==0
 
-    return imgs, poses, render_poses, [H, W, focal], i_split, intrinsics, depths
+    return imgs, poses, render_poses, [H, W, focal], i_split, intrinsics, depths, labels
