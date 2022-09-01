@@ -131,7 +131,9 @@ def load_pickle(filename):
         return pickle.load(f)
 
 
-def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgname="0128_irL_kuafu_half.png", is_real_rgb = False):
+def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=None, is_real_rgb = False):
+    imgname = cfg.dataset.imgname
+    imgname_off = cfg.dataset.imgname_off
     splits = ["train", "val", "test"]
     metas = {}
     #for s in splits:
@@ -143,6 +145,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
     all_intrinsics = []
     all_depths = []
     all_labels = []
+    all_patterns = []
     counts = [0]
     #is_real_rgb = False
     if is_real_rgb:
@@ -162,6 +165,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
         intrinsics = []
         depths = []
         labels = []
+        patterns = []
         #print(os.listdir(path))
         for prefix in os.listdir(path):
             #print(os.path.join(path, prefix, 'meta.pkl'))
@@ -174,22 +178,31 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
 
             #for frame in meta["frames"][::skip]:
             fname = os.path.join(path, prefix, imgname)
+            fname_off = os.path.join(path, prefix, imgname_off)
             gt_depth_fname = os.path.join(path, prefix, depth_n)
             label_fname = os.path.join(path, prefix, label_n)
             #testimg = np.array(imageio.imread(fname))
             #print(testimg.shape, np.max(testimg), np.min(testimg))
-            cur_img = imageio.imread(fname)
+            cur_img = imageio.imread(fname).astype(int)
+            cur_img_off = imageio.imread(fname_off).astype(int)
+            #print(type(cur_img), cur_img.dtype)
+            #assert 1==0
             if len(cur_img.shape) != 3:
                 cur_img = np.array(cur_img)[...,None]
                 cur_img = np.concatenate((cur_img, cur_img, cur_img), axis=-1)
+                cur_img_off = np.array(cur_img_off)[...,None]
+                cur_img_off = np.concatenate((cur_img_off, cur_img_off, cur_img_off), axis=-1)
                 #print(cur_img.shape)
             H,W = cur_img.shape[:2]
             #print(cur_img.shape)
             #assert 1==0
-            imgs.append(cur_img)
+            cur_pattern = cur_img - cur_img_off
+            cur_pattern = np.clip(cur_pattern, 0, 255)
+            imgs.append(cur_img_off)
             depths.append(np.array(Image.open(gt_depth_fname))/1000)
             poses.append(np.array(meta[extri_n]))
             labels.append(np.array(Image.open(label_fname)))
+            patterns.append(cur_pattern)
             if half_res:
                 intrinsics_c = np.array(meta[intri_n])
                 intrinsics_c[:2,:] = intrinsics_c[:2,:]/4
@@ -206,6 +219,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
         imgs = (np.array(imgs) / 255.0).astype(np.float32)
         depths = np.array(depths).astype(np.float32)
         labels = np.array(labels).astype(np.float32)
+        patterns = (np.array(patterns) / 255.0).astype(np.float32)
         #print(imgs.shape)
         counts.append(counts[-1] + imgs.shape[0])
         #assert 1==0
@@ -215,6 +229,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
         all_intrinsics.append(intrinsics)
         all_depths.append(depths)
         all_labels.append(labels)
+        all_patterns.append(patterns)
 
     i_split = [np.arange(counts[i], counts[i + 1]) for i in range(len(splits))]
 
@@ -223,6 +238,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
     intrinsics = np.concatenate(all_intrinsics, 0)
     depths = np.concatenate(all_depths,0)
     labels = np.concatenate(all_labels,0)
+    patterns = np.concatenate(all_patterns,0)
 
     H, W = imgs[0].shape[:2]
     #camera_angle_x = float(meta["camera_angle_x"])
@@ -282,6 +298,14 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
     ]
     imgs = torch.stack(imgs, 0)
 
+    patterns = [
+        torch.from_numpy(
+            cv2.resize(patterns[i], dsize=(W, H), interpolation=cv2.INTER_AREA)
+        )
+        for i in range(patterns.shape[0])
+    ]
+    patterns = torch.stack(patterns, 0)
+
     depths = [
         torch.from_numpy(
             cv2.resize(depths[i], dsize=(W, H), interpolation=cv2.INTER_NEAREST)
@@ -307,4 +331,4 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
     #print(poses.shape)
     #assert 1==0
 
-    return imgs, poses, render_poses, [H, W, focal], i_split, intrinsics, depths, labels
+    return imgs, poses, render_poses, [H, W, focal], i_split, intrinsics, depths, labels, patterns

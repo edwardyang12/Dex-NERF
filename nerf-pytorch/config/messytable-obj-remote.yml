@@ -21,6 +21,7 @@ dataset:
   type: blender
   # Base directory of dataset.
   basedir: /jianyu-fast-vol/data/nerf_real_data
+  is_real_rgb: False
   # Optionally, provide a path to the pre-cached dataset dir. This
   # overrides the other dataset options.
   cachedir: /jianyu-fast-vol/data/cache
