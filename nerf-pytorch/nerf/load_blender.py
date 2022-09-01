@@ -132,7 +132,7 @@ def load_pickle(filename):
 
 
 def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=None, is_real_rgb = False, sceneid = 1):
-    basedir = os.path.join(basedir, sceneid)
+    basedir = os.path.join(basedir, str(sceneid))
     imgname = cfg.dataset.imgname
     imgname_off = cfg.dataset.imgname_off
     splits = ["train", "val", "test"]

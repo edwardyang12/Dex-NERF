@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: jianyu-nerf-obj-real-on # Replace with something like "${USER_NAME}-{EXP_NAME}"
+  name: jianyu-nerf-obj-sim-0 # Replace with something like "${USER_NAME}-{EXP_NAME}"
   namespace: ucsd-haosulab
 spec:
   ttlSecondsAfterFinished: 86400  # Wait one day to delete completed jobs
@@ -15,7 +15,7 @@ spec:
             - "/bin/bash"
             - "-c"
           args:
-            - "apt install -y imagemagick && cd /jianyu-fast-vol/nerf-obj/nerf-pytorch && export PYTHONPATH=. && python train_nerf_rgb.py --config config/messytable-obj-remote.yml"
+            - "apt install -y imagemagick && cd /jianyu-fast-vol/nerf-env/nerf-pytorch && export PYTHONPATH=. && python train_nerf_ir2.py --config config/messytable-obj-remote.yml --sceneid 0"
             # For multiple commands, concatenate them with &&
           resources:
             requests:
