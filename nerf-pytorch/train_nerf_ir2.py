@@ -188,7 +188,7 @@ def main():
     )
 
     # Setup logging.
-    logdir = os.path.join(cfg.experiment.logdir, configargs.sceneid)
+    logdir = os.path.join(cfg.experiment.logdir, str(configargs.sceneid))
     os.makedirs(logdir, exist_ok=True)
     
     m_thres_max = cfg.nerf.validation.m_thres
