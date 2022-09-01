@@ -3,7 +3,7 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: /jianyu-fast-vol/eval/nerf_obj_real_on
+  logdir: /jianyu-fast-vol/eval/nerf_obj_sim
   # Seed for random number generators (for repeatability).
   randomseed: 42  # Cause, why not?
   # Number of training iterations.
@@ -20,14 +20,15 @@ dataset:
   # Type of dataset (Blender vs LLFF vs DeepVoxels vs something else)
   type: blender
   # Base directory of dataset.
-  basedir: /jianyu-fast-vol/data/nerf_real_data
+  basedir: /messytable-slow-vol/messy-table-dataset/nerf-sim-pattern2/  
   is_real_rgb: False
   # Optionally, provide a path to the pre-cached dataset dir. This
   # overrides the other dataset options.
   cachedir: /jianyu-fast-vol/data/cache
   # For the Blender datasets (synthetic), optionally return images
   # at half the original resolution of 800 x 800, to save space.
-  imgname: 1024_irL_real.png
+  imgname: 0128_irL_kuafu_half.png
+  imgname_off: 0128_irL_kuafu_half_no_ir.png
   half_res: True
   # Stride (include one per "testskip" images in the dataset).
   testskip: 1
@@ -43,6 +44,37 @@ dataset:
 models:
   # Coarse model.
   coarse:
+    # Name of the torch.nn.Module class that implements the model.
+    type: FlexibleNeRFModel
+    # Number of layers in the model.
+    num_layers: 8
+    # Number of hidden units in each layer of the MLP (multi-layer
+    # perceptron).
+    hidden_size: 128
+    # Add a skip connection once in a while. Note: This parameter
+    # won't take affect unless num_layers > skip_connect_every.
+    skip_connect_every: 3
+    # Whether to include the position (xyz) itself in its positional
+    # encoding.
+    include_input_xyz: True
+    # Whether or not to perform log sampling in the positional encoding
+    # of the coordinates.
+    log_sampling_xyz: True
+    # Number of encoding functions to use in the positional encoding
+    # of the coordinates.
+    num_encoding_fn_xyz: 10
+    # Additionally use viewing directions as input.
+    use_viewdirs: True
+    # Whether to include the direction itself in its positional encoding.
+    include_input_dir: True
+    # Number of encoding functions to use in the positional encoding
+    # of the direction.
+    num_encoding_fn_dir: 4
+    # Whether or not to perform log sampling in the positional encoding
+    # of the direction.
+    log_sampling_dir: True
+
+  env:
     # Name of the torch.nn.Module class that implements the model.
     type: FlexibleNeRFModel
     # Number of layers in the model.
@@ -166,4 +198,4 @@ nerf:
     radiance_field_noise_std: 0.
     # Sample linearly in disparity space, as opposed to in depth space.
     lindisp: False
-    m_thres: 100
+    m_thres: 20

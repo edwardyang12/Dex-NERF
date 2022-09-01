@@ -34,6 +34,12 @@ def main():
         default="",
         help="Path to load saved checkpoint from.",
     )
+    parser.add_argument(
+        "--sceneid",
+        type=int,
+        default=0,
+        help="The scene id that need to train",
+    )
     configargs = parser.parse_args()
 
     # Read config file.
@@ -65,7 +71,8 @@ def main():
                 half_res=cfg.dataset.half_res,
                 testskip=cfg.dataset.testskip,
                 cfg=cfg,
-                is_real_rgb=cfg.dataset.is_real_rgb
+                is_real_rgb=cfg.dataset.is_real_rgb,
+                sceneid = configargs.sceneid
             )
             i_train, i_val, i_test = i_split
             H, W, _ = hwf
@@ -181,7 +188,7 @@ def main():
     )
 
     # Setup logging.
-    logdir = os.path.join(cfg.experiment.logdir, cfg.experiment.id)
+    logdir = os.path.join(cfg.experiment.logdir, configargs.sceneid)
     os.makedirs(logdir, exist_ok=True)
     
     m_thres_max = cfg.nerf.validation.m_thres
