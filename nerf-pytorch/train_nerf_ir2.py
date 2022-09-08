@@ -386,6 +386,12 @@ def main():
             writer.add_scalar("train/fine_loss", fine_loss.item(), i)
         writer.add_scalar("train/psnr", psnr, i)
 
+        #writer.add_image(
+        #            "train/img_target",
+        #            cast_to_image(img_target[..., :3]),
+        #            i,
+        #        )
+
         # Validation
         if (
             i % cfg.experiment.validate_every == 0
