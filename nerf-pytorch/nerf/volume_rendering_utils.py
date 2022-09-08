@@ -145,12 +145,13 @@ def volume_render_radiance_field_ir(
 
 def volume_render_radiance_field_ir_env(
     radiance_field,
+    radiance_field_env,
     depth_values,
     ray_directions,
+    c_ray_directions,
     radiance_field_noise_std=0.0,
     white_background=False,
     m_thres_cand=None,
-    occupancy=None
 ):
     # TESTED
     #print(depth_values[0,:])
@@ -167,23 +168,27 @@ def volume_render_radiance_field_ir_env(
     )
     dists = dists * ray_directions[..., None, :].norm(p=2, dim=-1)
 
-    rgb = torch.sigmoid(radiance_field[..., :3])
+    rgb = radiance_field[..., :3]
+    rgb_ir = radiance_field_env[..., :3]
+    combined_rgb = torch.sigmoid(rgb + rgb_ir)
+    #print(combined_rgb.shape, combined_rgb[0,0,:])
+    #assert 1==0
     noise = 0.0
     if radiance_field_noise_std > 0.0:
         noise = (
             torch.randn(
-                occupancy[..., 3].shape,
-                dtype=occupancy.dtype,
-                device=occupancy.device,
+                radiance_field[..., 3].shape,
+                dtype=radiance_field.dtype,
+                device=radiance_field.device,
             )
             * radiance_field_noise_std
         )
         # noise = noise.to(radiance_field)
-    sigma_a = torch.nn.functional.relu(occupancy[..., 3] + noise)
+    sigma_a = torch.nn.functional.relu(radiance_field[..., 3] + noise)
     alpha = 1.0 - torch.exp(-sigma_a * dists)
     weights = alpha * cumprod_exclusive(1.0 - alpha + 1e-10)
 
-    rgb_map = weights[..., None] * rgb
+    rgb_map = weights[..., None] * combined_rgb
     rgb_map = rgb_map.sum(dim=-2)
     #print(depth_values[0,:])
     depth_map = weights * depth_values
@@ -211,5 +216,6 @@ def volume_render_radiance_field_ir_env(
 
     #assert 1==0
     #print(depth_map_dex.shape)
+
     out = [rgb_map, disp_map, acc_map, weights, depth_map, sigma_a] + depth_map_dex
     return tuple(out)

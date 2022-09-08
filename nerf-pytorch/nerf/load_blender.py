@@ -199,7 +199,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
             #assert 1==0
             cur_pattern = cur_img - cur_img_off
             cur_pattern = np.clip(cur_pattern, 0, 255)
-            imgs.append(cur_img_off)
+            imgs.append(cur_img)
             depths.append(np.array(Image.open(gt_depth_fname))/1000)
             poses.append(np.array(meta[extri_n]))
             labels.append(np.array(Image.open(label_fname)))

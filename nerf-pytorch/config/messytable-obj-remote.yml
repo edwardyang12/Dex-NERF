@@ -3,7 +3,7 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: /jianyu-fast-vol/eval/nerf_obj_sim
+  logdir: /jianyu-fast-vol/eval/nerf_obj_sim_ir
   # Seed for random number generators (for repeatability).
   randomseed: 42  # Cause, why not?
   # Number of training iterations.
@@ -76,9 +76,9 @@ models:
 
   env:
     # Name of the torch.nn.Module class that implements the model.
-    type: FlexibleNeRFModel
+    type: FlexibleIRNeRFModel
     # Number of layers in the model.
-    num_layers: 8
+    num_layers: 12
     # Number of hidden units in each layer of the MLP (multi-layer
     # perceptron).
     hidden_size: 128
