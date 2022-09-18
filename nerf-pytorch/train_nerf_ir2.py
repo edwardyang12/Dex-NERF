@@ -66,7 +66,7 @@ def main():
         # Load dataset
         images, poses, render_poses, hwf = None, None, None, None
         if cfg.dataset.type.lower() == "blender":
-            images, poses, render_poses, hwf, i_split, intrinsics, depths, labels, patterns = load_messytable_data(
+            images, poses, render_poses, hwf, i_split, intrinsics, depths, labels, imgs_off = load_messytable_data(
                 cfg.dataset.basedir,
                 half_res=cfg.dataset.half_res,
                 testskip=cfg.dataset.testskip,
@@ -214,7 +214,7 @@ def main():
         start_iter = checkpoint["iter"]
 
     # # TODO: Prepare raybatch tensor if batching random rays
-
+    no_ir_train = True
     for i in trange(start_iter, cfg.experiment.train_iters):
 
         model_coarse.train()
@@ -272,7 +272,7 @@ def main():
 
             #print(pose_target.shape)
             intrinsic_target = intrinsics[img_idx,:,:].to(device)
-            pattern_target = patterns[img_idx].to(device)
+            img_off_target = imgs_off[img_idx].to(device)
             #print(intrinsic_target)
             #print(img_idx)
             #print("===========================================")
@@ -299,6 +299,7 @@ def main():
             target_s = img_target[select_inds[:, 0], select_inds[:, 1]]
             #target_env = pattern_target[select_inds[:, 0], select_inds[:, 1]]
             target_d = depth_target[select_inds[:, 0], select_inds[:, 1]]
+            target_s_off = img_off_target[select_inds[:, 0], select_inds[:, 1]]
             
 
             #print(target_s.shape)
@@ -325,8 +326,8 @@ def main():
                 encode_direction_fn=encode_direction_fn,
                 m_thres_cand=m_thres_cand
             )
-            rgb_coarse, rgb_fine = nerf_out[0], nerf_out[3]
-            alpha_fine = nerf_out[7]
+            rgb_coarse, rgb_off_coarse, rgb_fine, rgb_off_fine = nerf_out[0], nerf_out[1], nerf_out[4], nerf_out[5]
+            alpha_fine = nerf_out[9]
 
             #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
             #rgb_fine = torch.mean(rgb_fine, dim=-1)
@@ -334,15 +335,28 @@ def main():
             target_ray_values = target_s
             #assert 1==0
         
-        coarse_loss = torch.nn.functional.mse_loss(
-            rgb_coarse[..., :3], target_ray_values[..., :3]
+        if i > cfg.experiment.finetune_start:
+            no_ir_train = False
+        coarse_loss = 0.0
+        if not no_ir_train:
+            coarse_loss = torch.nn.functional.mse_loss(
+                rgb_coarse[..., :3], target_ray_values[..., :3]
+            )
+        coarse_loss += torch.nn.functional.mse_loss(
+            rgb_off_coarse[..., :3], target_s_off[..., :3]
         )
        
         fine_loss = None
         if rgb_fine is not None:
-            fine_loss = torch.nn.functional.mse_loss(
-                rgb_fine[..., :3], target_ray_values[..., :3]
+            fine_loss = 0.0
+            if not no_ir_train:
+                fine_loss = torch.nn.functional.mse_loss(
+                    rgb_fine[..., :3], target_ray_values[..., :3]
+                )
+            fine_loss += torch.nn.functional.mse_loss(
+                rgb_off_fine[..., :3], target_s_off[..., :3]
             )
+            #fine_loss = fine_loss + fine_loss_off
 
 
         if configargs.depth_supervise == True:
@@ -382,6 +396,7 @@ def main():
             )
         writer.add_scalar("train/loss", loss.item(), i)
         writer.add_scalar("train/coarse_loss", coarse_loss.item(), i)
+        #writer.add_scalar("train/coarse_loss_off", coarse_loss_off.item(), i)
         if rgb_fine is not None:
             writer.add_scalar("train/fine_loss", fine_loss.item(), i)
         writer.add_scalar("train/psnr", psnr, i)
@@ -432,7 +447,7 @@ def main():
                     pose_target = poses[img_idx, :, :].to(device)
                     depth_target = depths[img_idx].to(device)
                     label_target = labels[img_idx].to(device)
-
+                    img_off_target = imgs_off[img_idx].to(device)
                     #print(label_target.shape, label_target[135,240])
                     #assert 1==0
                     intrinsic_target = intrinsics[img_idx,:,:].to(device)
@@ -458,9 +473,9 @@ def main():
                         encode_direction_fn=encode_direction_fn,
                         m_thres_cand=m_thres_cand
                     )
-                    rgb_coarse, rgb_fine = nerf_out[0], nerf_out[3]
-                    depth_fine_nerf = nerf_out[6]
-                    depth_fine_dex = list(nerf_out[8:])
+                    rgb_coarse, rgb_coarse_off, rgb_fine, rgb_fine_off = nerf_out[0], nerf_out[1], nerf_out[4], nerf_out[5]
+                    depth_fine_nerf = nerf_out[8]
+                    depth_fine_dex = list(nerf_out[10:])
                     target_ray_values = img_target
                     #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
                     #rgb_fine = torch.mean(rgb_fine, dim=-1)
@@ -485,15 +500,26 @@ def main():
                 writer.add_image(
                     "validation/rgb_coarse", cast_to_image(rgb_coarse[..., :3]), i
                 )
+                writer.add_image(
+                    "validation/rgb_coarse_off", cast_to_image(rgb_coarse_off[..., :3]), i
+                )
                 if rgb_fine is not None:
                     writer.add_image(
                         "validation/rgb_fine", cast_to_image(rgb_fine[..., :3]), i
+                    )
+                    writer.add_image(
+                        "validation/rgb_fine_off", cast_to_image(rgb_fine_off[..., :3]), i
                     )
                     writer.add_scalar("validation/fine_loss", fine_loss.item(), i)
                 #print(cast_to_image(target_ray_values[..., :3]).shape, type(cast_to_image(target_ray_values[..., :3])))
                 writer.add_image(
                     "validation/img_target",
                     cast_to_image(target_ray_values[..., :3]),
+                    i,
+                )
+                writer.add_image(
+                    "validation/img_off_target",
+                    cast_to_image(img_off_target[..., :3]),
                     i,
                 )
 

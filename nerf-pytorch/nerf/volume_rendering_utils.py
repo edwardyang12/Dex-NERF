@@ -171,6 +171,7 @@ def volume_render_radiance_field_ir_env(
     rgb = radiance_field[..., :3]
     rgb_ir = radiance_field_env[..., :3]
     combined_rgb = torch.sigmoid(rgb + rgb_ir)
+    env_rgb = torch.sigmoid(rgb)
     #print(combined_rgb.shape, combined_rgb[0,0,:])
     #assert 1==0
     noise = 0.0
@@ -190,6 +191,9 @@ def volume_render_radiance_field_ir_env(
 
     rgb_map = weights[..., None] * combined_rgb
     rgb_map = rgb_map.sum(dim=-2)
+
+    env_rgb_map = weights[..., None] * env_rgb
+    env_rgb_map = env_rgb_map.sum(dim=-2)
     #print(depth_values[0,:])
     depth_map = weights * depth_values
 
@@ -217,5 +221,5 @@ def volume_render_radiance_field_ir_env(
     #assert 1==0
     #print(depth_map_dex.shape)
 
-    out = [rgb_map, disp_map, acc_map, weights, depth_map, sigma_a] + depth_map_dex
+    out = [rgb_map, env_rgb_map, disp_map, acc_map, weights, depth_map, sigma_a] + depth_map_dex
     return tuple(out)

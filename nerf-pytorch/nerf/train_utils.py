@@ -398,10 +398,10 @@ def predict_and_render_radiance_ir(
         white_background=getattr(options.nerf, mode).white_background,
         m_thres_cand=m_thres_cand,
     )
-    rgb_coarse, disp_coarse, acc_coarse, weights, depth_coarse = coarse_out[0], coarse_out[1], coarse_out[2], coarse_out[3], coarse_out[4]
+    rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, weights, depth_coarse = coarse_out[0], coarse_out[1], coarse_out[2], coarse_out[3], coarse_out[4], coarse_out[5]
     #rgb_coarse_env, disp_coarse_env, acc_coarse_env, weights_env, depth_coarse_env = \
     #    coarse_out_env[0], coarse_out_env[1], coarse_out_env[2], coarse_out_env[3], coarse_out_env[4]
-    depth_coarse_dex = list(coarse_out[6:])
+    depth_coarse_dex = list(coarse_out[7:])
     #depth_coarse_dex_env = list(coarse_out_env[6:])
 
     #print(torch.min(rgb_coarse), torch.max(rgb_coarse))
@@ -472,19 +472,19 @@ def predict_and_render_radiance_ir(
             m_thres_cand=m_thres_cand,
         )
         #print(z_vals[0,:])
-        rgb_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2]
-        depth_fine_nerf = fine_out[4]
-        alpha_fine = fine_out[5]
+        rgb_fine, rgb_off_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2], fine_out[3]
+        depth_fine_nerf = fine_out[5]
+        alpha_fine = fine_out[6]
 
         #rgb_fine_env, disp_fine_env, acc_fine_env, depth_fine_env = \
         #fine_out_env[0], fine_out_env[1], fine_out_env[2], fine_out_env[4]
         #print(alpha_fine[500,:])
-        depth_fine_dex = list(fine_out[6:])
+        depth_fine_dex = list(fine_out[7:])
         #rgb_fine_final = torch.clip(rgb_fine + rgb_fine_env,0.,1.)
         #print(depth_fine_nerf.shape, alpha_fine.shape, rgb_coarse.shape)
     #print(acc_fine.shape)
-    out = [rgb_coarse, disp_coarse, acc_coarse, \
-        rgb_fine, disp_fine, acc_fine, depth_fine_nerf, \
+    out = [rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, \
+        rgb_fine, rgb_off_fine, disp_fine, acc_fine, depth_fine_nerf, \
         alpha_fine] + depth_fine_dex
     return tuple(out)
 
@@ -610,6 +610,7 @@ def run_one_iter_of_nerf_ir(
         cam_viewdirs = cam_viewdirs.view((-1, 3))
     # Cache shapes now, for later restoration.
     restore_shapes = [
+        ray_directions.shape,
         ray_directions.shape,
         ray_directions.shape[:-1],
         ray_directions.shape[:-1],

@@ -272,10 +272,12 @@ class FlexibleIRNeRFModel(torch.nn.Module):
         include_input_xyz=True,
         include_input_dir=True,
         use_viewdirs=True,
+        use_alpha=False
     ):
         super(FlexibleIRNeRFModel, self).__init__()
 
         self.num_layers = num_layers
+        self.use_alpha = use_alpha
 
         include_input_xyz = 3 * 2 if include_input_xyz else 0
         include_input_dir = 3 * 2 if include_input_dir else 0
@@ -303,8 +305,8 @@ class FlexibleIRNeRFModel(torch.nn.Module):
             self.layers_dir.append(
                 torch.nn.Linear(self.dim_dir + hidden_size, hidden_size // 2)
             )
-
-            #self.fc_alpha = torch.nn.Linear(hidden_size, 1)
+            if use_alpha:
+                self.fc_alpha = torch.nn.Linear(hidden_size, 1)
             self.fc_rgb = torch.nn.Linear(hidden_size // 2, 3)
             self.fc_feat = torch.nn.Linear(hidden_size, hidden_size)
         else:
@@ -330,12 +332,16 @@ class FlexibleIRNeRFModel(torch.nn.Module):
             x = self.relu(self.layers_xyz[i](x))
         if self.use_viewdirs:
             feat = self.relu(self.fc_feat(x))
-            #alpha = self.fc_alpha(x)
+            if self.use_alpha:
+                alpha = self.fc_alpha(x)
             x = torch.cat((feat, view), dim=-1)
             for l in self.layers_dir:
                 x = self.relu(l(x))
             rgb = self.fc_rgb(x)
-            return rgb
+            if self.use_alpha:
+                return torch.cat((rgb, alpha), dim=-1)
+            else:
+                return rgb
         else:
             return self.fc_out(x)
 
