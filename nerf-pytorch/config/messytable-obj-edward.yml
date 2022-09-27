@@ -1,7 +1,7 @@
 # Parameters to setup experiment.
 experiment:
   # Unique experiment identifier
-  id: messytable-rgb
+  id: messytable-gray
   # Experiment logs will be stored at "logdir"/"id"
   logdir: /edward-slow-vol/checkpoints
   # Seed for random number generators (for repeatability).
@@ -21,9 +21,7 @@ dataset:
   type: blender
   # Base directory of dataset.
   basedir: /jianyu-fast-vol/data/nerf_data
-  # Optionally, provide a path to the pre-cached dataset dir. This
-  # overrides the other dataset options.
-  cachedir: /jianyu-fast-vol/data/cache
+  imgname: 0128_irL_kuafu_half_no_ir.png
   # For the Blender datasets (synthetic), optionally return images
   # at half the original resolution of 800 x 800, to save space.
   half_res: True

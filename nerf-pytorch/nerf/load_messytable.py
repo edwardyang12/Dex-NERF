@@ -145,8 +145,8 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, imgna
     #     H = 1080
     #     W = 1920
 
-    H = H // 4
-    W = W // 4
+    H = H // 2
+    W = W // 2
     focal = focal / 4.0
     imgs = [
         torch.from_numpy(
