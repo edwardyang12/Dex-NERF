@@ -69,6 +69,7 @@ def main():
             images, poses, render_poses, hwf, i_split, intrinsics, depths, labels, imgs_off = load_messytable_data(
                 cfg.dataset.basedir,
                 half_res=cfg.dataset.half_res,
+                debug = True,
                 testskip=cfg.dataset.testskip,
                 cfg=cfg,
                 is_real_rgb=cfg.dataset.is_real_rgb,
@@ -138,6 +139,7 @@ def main():
         include_input_xyz=cfg.models.coarse.include_input_xyz,
         include_input_dir=cfg.models.coarse.include_input_dir,
         use_viewdirs=cfg.models.coarse.use_viewdirs,
+        color_channel=1
     )
     model_coarse.to(device)
     model_env_coarse = getattr(models, cfg.models.env.type)(
@@ -149,6 +151,7 @@ def main():
         include_input_xyz=cfg.models.env.include_input_xyz,
         include_input_dir=cfg.models.env.include_input_dir,
         use_viewdirs=cfg.models.env.use_viewdirs,
+        color_channel=1
     )
     model_env_coarse.to(device)
     model_env_fine = getattr(models, cfg.models.env.type)(
@@ -160,8 +163,17 @@ def main():
         include_input_xyz=cfg.models.env.include_input_xyz,
         include_input_dir=cfg.models.env.include_input_dir,
         use_viewdirs=cfg.models.env.use_viewdirs,
+        color_channel=1
     )
     model_env_fine.to(device)
+
+    model_fuse = getattr(models, cfg.models.fuse.type)(
+        num_layers=cfg.models.coarse.num_layers,
+        hidden_size=cfg.models.coarse.hidden_size,
+    )
+    model_fuse.to(device)
+
+
     # If a fine-resolution model is specified, initialize it.
     model_fine = None
     if hasattr(cfg.models, "fine"):
@@ -174,17 +186,22 @@ def main():
             include_input_xyz=cfg.models.fine.include_input_xyz,
             include_input_dir=cfg.models.fine.include_input_dir,
             use_viewdirs=cfg.models.fine.use_viewdirs,
+            color_channel=1
         )
         model_fine.to(device)
 
     # Initialize optimizer.
     trainable_parameters = list(model_coarse.parameters())
-    trainable_parameters += list(model_env_coarse.parameters())
+    trainable_parameters_env = list(model_env_coarse.parameters())
+    trainable_parameters_env += list(model_fuse.parameters())
     if model_fine is not None:
         trainable_parameters += list(model_fine.parameters())
-        trainable_parameters += list(model_env_fine.parameters())
+        trainable_parameters_env += list(model_env_fine.parameters())
     optimizer = getattr(torch.optim, cfg.optimizer.type)(
         trainable_parameters, lr=cfg.optimizer.lr
+    )
+    optimizer_env = getattr(torch.optim, cfg.optimizer.type)(
+        trainable_parameters_env, lr=cfg.optimizer.lr
     )
 
     # Setup logging.
@@ -215,13 +232,16 @@ def main():
 
     # # TODO: Prepare raybatch tensor if batching random rays
     no_ir_train = True
+    jointtrain = False
     for i in trange(start_iter, cfg.experiment.train_iters):
 
         model_coarse.train()
         model_env_coarse.train()
+        model_fuse.train()
         if model_fine:
             model_fine.train()
             model_env_fine.train()
+
 
         rgb_coarse, rgb_fine = None, None
         target_ray_values = None
@@ -265,8 +285,11 @@ def main():
         else:
             img_idx = np.random.choice(i_train)
             img_target = images[img_idx].to(device)
+            
             pose_target = poses[img_idx, :, :].to(device)
             depth_target = depths[img_idx].to(device)
+            #print(img_target.shape, depth_target.shape)
+            #assert 1==0
             #print("===========================================")
             #print(pose_target)
 
@@ -296,7 +319,9 @@ def main():
             #print(ray_directions.shape)
             cam_directions = cam_directions[select_inds[:, 0], select_inds[:, 1], :]
             
-            target_s = img_target[select_inds[:, 0], select_inds[:, 1]]
+            target_s = img_target[select_inds[:, 0], select_inds[:, 1]] # [1080]
+            #print(target_s.shape)
+            #assert 1==0
             #target_env = pattern_target[select_inds[:, 0], select_inds[:, 1]]
             target_d = depth_target[select_inds[:, 0], select_inds[:, 1]]
             target_s_off = img_off_target[select_inds[:, 0], select_inds[:, 1]]
@@ -316,6 +341,7 @@ def main():
                 model_fine,
                 model_env_coarse,
                 model_env_fine,
+                model_fuse,
                 ray_origins,
                 ray_directions,
                 cam_origins.cuda(),
@@ -332,29 +358,35 @@ def main():
             #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
             #rgb_fine = torch.mean(rgb_fine, dim=-1)
             #print(rgb_coarse.shape, rgb_fine.shape)
-            target_ray_values = target_s
+            target_ray_values = target_s.unsqueeze(-1)
+            target_ray_values_off = target_s_off.unsqueeze(-1)
+            #print(rgb_coarse.shape, rgb_fine.shape, target_ray_values.shape)
             #assert 1==0
         
-        if i > cfg.experiment.finetune_start:
+        if i == cfg.experiment.finetune_start:
             no_ir_train = False
+        if i == cfg.experiment.jointtrain_start:
+            jointtrain = True
         coarse_loss = 0.0
         if not no_ir_train:
             coarse_loss = torch.nn.functional.mse_loss(
-                rgb_coarse[..., :3], target_ray_values[..., :3]
+                rgb_coarse, target_ray_values
             )
         coarse_loss += torch.nn.functional.mse_loss(
-            rgb_off_coarse[..., :3], target_s_off[..., :3]
+            rgb_off_coarse, target_ray_values_off
         )
+        #print(rgb_off_coarse.shape, target_ray_values_off.shape)
+        #assert 1==0
        
         fine_loss = None
         if rgb_fine is not None:
             fine_loss = 0.0
             if not no_ir_train:
                 fine_loss = torch.nn.functional.mse_loss(
-                    rgb_fine[..., :3], target_ray_values[..., :3]
+                    rgb_fine, target_ray_values
                 )
             fine_loss += torch.nn.functional.mse_loss(
-                rgb_off_fine[..., :3], target_s_off[..., :3]
+                rgb_off_fine, target_ray_values_off
             )
             #fine_loss = fine_loss + fine_loss_off
 
@@ -372,10 +404,16 @@ def main():
         # else:
         #     loss = coarse_loss
         loss = coarse_loss + (fine_loss if fine_loss is not None else 0.0)
+        
+        if no_ir_train == True and jointtrain == False:
+            optimizer.zero_grad()
+        optimizer_env.zero_grad()
         loss.backward()
         psnr = mse2psnr(loss.item())
-        optimizer.step()
-        optimizer.zero_grad()
+        if no_ir_train == True and jointtrain == False:
+            optimizer.step()
+        optimizer_env.step()
+        
 
         # Learning rate updates
         num_decay_steps = cfg.scheduler.lr_decay * 1000
@@ -406,7 +444,7 @@ def main():
         #            cast_to_image(img_target[..., :3]),
         #            i,
         #        )
-
+        #assert 1==0
         # Validation
         if (
             i % cfg.experiment.validate_every == 0
@@ -414,8 +452,11 @@ def main():
         ):
             tqdm.write("[VAL] =======> Iter: " + str(i))
             model_coarse.eval()
+            model_env_coarse.eval()
+            model_fuse.eval()
             if model_fine:
-                model_coarse.eval()
+                model_fine.eval()
+                model_env_fine.eval()
 
             start = time.time()
             with torch.no_grad():
@@ -463,6 +504,7 @@ def main():
                         model_fine,
                         model_env_coarse,
                         model_env_fine,
+                        model_fuse,
                         ray_origins,
                         ray_directions,
                         cam_origins.cuda(),
@@ -476,17 +518,18 @@ def main():
                     rgb_coarse, rgb_coarse_off, rgb_fine, rgb_fine_off = nerf_out[0], nerf_out[1], nerf_out[4], nerf_out[5]
                     depth_fine_nerf = nerf_out[8]
                     depth_fine_dex = list(nerf_out[10:])
-                    target_ray_values = img_target
+                    target_ray_values = img_target.unsqueeze(-1)
+                    #print(rgb_coarse.shape,rgb_fine.shape, target_ray_values.shape)
                     #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
                     #rgb_fine = torch.mean(rgb_fine, dim=-1)
                 #print(target_ray_values.shape, rgb_coarse.shape)
                 #assert 1==0
                 #print(depth_fine_dex.shape)
                 #print(rgb_coarse.shape, target_ray_values.shape)
-                coarse_loss = img2mse(rgb_coarse[..., :3], target_ray_values[..., :3])
+                coarse_loss = img2mse(rgb_coarse, target_ray_values)
                 loss, fine_loss = 0.0, 0.0
                 if rgb_fine is not None:
-                    fine_loss = img2mse(rgb_fine[..., :3], target_ray_values[..., :3])
+                    fine_loss = img2mse(rgb_fine, target_ray_values)
                     loss = fine_loss
                 else:
                     loss = coarse_loss
@@ -498,28 +541,28 @@ def main():
                 writer.add_scalar("validation/coarse_loss", coarse_loss.item(), i)
                 writer.add_scalar("validataion/psnr", psnr, i)
                 writer.add_image(
-                    "validation/rgb_coarse", cast_to_image(rgb_coarse[..., :3]), i
+                    "validation/rgb_coarse", vutils.make_grid(rgb_coarse[...,0], padding=0, nrow=1, normalize=True, scale_each=True), i
                 )
                 writer.add_image(
-                    "validation/rgb_coarse_off", cast_to_image(rgb_coarse_off[..., :3]), i
+                    "validation/rgb_coarse_off", vutils.make_grid(rgb_coarse_off[...,0], padding=0, nrow=1, normalize=True, scale_each=True), i
                 )
                 if rgb_fine is not None:
                     writer.add_image(
-                        "validation/rgb_fine", cast_to_image(rgb_fine[..., :3]), i
+                        "validation/rgb_fine", vutils.make_grid(rgb_fine[...,0], padding=0, nrow=1, normalize=True, scale_each=True), i
                     )
                     writer.add_image(
-                        "validation/rgb_fine_off", cast_to_image(rgb_fine_off[..., :3]), i
+                        "validation/rgb_fine_off", vutils.make_grid(rgb_fine_off[...,0], padding=0, nrow=1, normalize=True, scale_each=True), i
                     )
                     writer.add_scalar("validation/fine_loss", fine_loss.item(), i)
                 #print(cast_to_image(target_ray_values[..., :3]).shape, type(cast_to_image(target_ray_values[..., :3])))
                 writer.add_image(
                     "validation/img_target",
-                    cast_to_image(target_ray_values[..., :3]),
+                    vutils.make_grid(target_ray_values[...,0], padding=0, nrow=1, normalize=True, scale_each=True),
                     i,
                 )
                 writer.add_image(
                     "validation/img_off_target",
-                    cast_to_image(img_off_target[..., :3]),
+                    vutils.make_grid(img_off_target, padding=0, nrow=1, normalize=True, scale_each=True),
                     i,
                 )
 
@@ -645,13 +688,15 @@ def main():
     print("Done!")
 
 
-def cast_to_image(tensor):
+def cast_to_image(tensor, color_channel=3):
+    #print(tensor.shape)
     # Input tensor is (H, W, 3). Convert to (3, H, W).
     tensor = tensor.permute(2, 0, 1)
     # Conver to PIL Image and then np.array (output shape: (H, W, 3))
     img = np.array(torchvision.transforms.ToPILImage()(tensor.detach().cpu()))
     # Map back to shape (3, H, W), as tensorboard needs channels first.
     img = np.moveaxis(img, [-1], [0])
+    #print(img.shape)
     return img
 
 

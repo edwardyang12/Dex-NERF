@@ -3,12 +3,13 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: ../logs_sim_ir_env_test2
+  logdir: ../logs_sim_ir_env_test5_fuse2
   # Seed for random number generators (for repeatability).
   randomseed: 42  # Cause, why not?
   # Number of training iterations.
   train_iters: 1000000
-  finetune_start: 50000
+  finetune_start: 10000
+  jointtrain_start: 20000
   # Number of training iterations after which to validate.
   validate_every: 1000
   # Number of training iterations after which to checkpoint.
@@ -43,6 +44,8 @@ dataset:
 
 # Model parameters.
 models:
+  fuse:
+    type: RadianceFuseModel
   # Coarse model.
   coarse:
     # Name of the torch.nn.Module class that implements the model.

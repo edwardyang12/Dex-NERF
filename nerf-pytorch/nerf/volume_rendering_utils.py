@@ -9,7 +9,8 @@ def volume_render_radiance_field(
     ray_directions,
     radiance_field_noise_std=0.0,
     white_background=False,
-    m_thres_cand=None
+    m_thres_cand=None,
+    color_channel=3
 ):
     # TESTED
     #print(depth_values[0,:])
@@ -26,19 +27,19 @@ def volume_render_radiance_field(
     )
     dists = dists * ray_directions[..., None, :].norm(p=2, dim=-1)
 
-    rgb = torch.sigmoid(radiance_field[..., :3])
+    rgb = torch.sigmoid(radiance_field[..., :color_channel])
     noise = 0.0
     if radiance_field_noise_std > 0.0:
         noise = (
             torch.randn(
-                radiance_field[..., 3].shape,
+                radiance_field[..., color_channel].shape,
                 dtype=radiance_field.dtype,
                 device=radiance_field.device,
             )
             * radiance_field_noise_std
         )
         # noise = noise.to(radiance_field)
-    sigma_a = torch.nn.functional.relu(radiance_field[..., 3] + noise)
+    sigma_a = torch.nn.functional.relu(radiance_field[..., color_channel] + noise)
     alpha = 1.0 - torch.exp(-sigma_a * dists)
     weights = alpha * cumprod_exclusive(1.0 - alpha + 1e-10)
 
@@ -79,7 +80,8 @@ def volume_render_radiance_field_ir(
     ray_directions,
     radiance_field_noise_std=0.0,
     white_background=False,
-    m_thres_cand=None
+    m_thres_cand=None,
+    color_channel=3
 ):
     # TESTED
     #print(depth_values[0,:])
@@ -96,19 +98,19 @@ def volume_render_radiance_field_ir(
     )
     dists = dists * ray_directions[..., None, :].norm(p=2, dim=-1)
 
-    rgb = torch.sigmoid(radiance_field[..., :3])
+    rgb = torch.sigmoid(radiance_field[..., :color_channel])
     noise = 0.0
     if radiance_field_noise_std > 0.0:
         noise = (
             torch.randn(
-                radiance_field[..., 3].shape,
+                radiance_field[..., color_channel].shape,
                 dtype=radiance_field.dtype,
                 device=radiance_field.device,
             )
             * radiance_field_noise_std
         )
         # noise = noise.to(radiance_field)
-    sigma_a = torch.nn.functional.relu(radiance_field[..., 3] + noise)
+    sigma_a = torch.nn.functional.relu(radiance_field[..., color_channel] + noise)
     alpha = 1.0 - torch.exp(-sigma_a * dists)
     weights = alpha * cumprod_exclusive(1.0 - alpha + 1e-10)
 
@@ -152,6 +154,7 @@ def volume_render_radiance_field_ir_env(
     radiance_field_noise_std=0.0,
     white_background=False,
     m_thres_cand=None,
+    color_channel=3
 ):
     # TESTED
     #print(depth_values[0,:])
@@ -168,24 +171,24 @@ def volume_render_radiance_field_ir_env(
     )
     dists = dists * ray_directions[..., None, :].norm(p=2, dim=-1)
 
-    rgb = radiance_field[..., :3]
-    rgb_ir = radiance_field_env[..., :3]
-    combined_rgb = torch.sigmoid(rgb + rgb_ir)
+    rgb = radiance_field[..., :color_channel]
+    rgb_ir = radiance_field_env[..., :color_channel]
+    combined_rgb = torch.sigmoid(rgb_ir) #torch.sigmoid(rgb + rgb_ir)
     env_rgb = torch.sigmoid(rgb)
-    #print(combined_rgb.shape, combined_rgb[0,0,:])
+    #print(combined_rgb.shape, env_rgb.shape,radiance_field.shape,radiance_field_env.shape)
     #assert 1==0
     noise = 0.0
     if radiance_field_noise_std > 0.0:
         noise = (
             torch.randn(
-                radiance_field[..., 3].shape,
+                radiance_field[..., color_channel].shape,
                 dtype=radiance_field.dtype,
                 device=radiance_field.device,
             )
             * radiance_field_noise_std
         )
         # noise = noise.to(radiance_field)
-    sigma_a = torch.nn.functional.relu(radiance_field[..., 3] + noise)
+    sigma_a = torch.nn.functional.relu(radiance_field[..., color_channel] + noise)
     alpha = 1.0 - torch.exp(-sigma_a * dists)
     weights = alpha * cumprod_exclusive(1.0 - alpha + 1e-10)
 

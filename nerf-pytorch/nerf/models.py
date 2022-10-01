@@ -193,6 +193,7 @@ class FlexibleNeRFModel(torch.nn.Module):
         include_input_xyz=True,
         include_input_dir=True,
         use_viewdirs=True,
+        color_channel=3
     ):
         super(FlexibleNeRFModel, self).__init__()
 
@@ -227,10 +228,11 @@ class FlexibleNeRFModel(torch.nn.Module):
             )
 
             self.fc_alpha = torch.nn.Linear(hidden_size, 1)
-            self.fc_rgb = torch.nn.Linear(hidden_size // 2, 3)
+
+            self.fc_rgb = torch.nn.Linear(hidden_size // 2, color_channel)
             self.fc_feat = torch.nn.Linear(hidden_size, hidden_size)
         else:
-            self.fc_out = torch.nn.Linear(hidden_size, 4)
+            self.fc_out = torch.nn.Linear(hidden_size, color_channel+1)
 
         self.relu = torch.nn.functional.relu
 
@@ -272,7 +274,8 @@ class FlexibleIRNeRFModel(torch.nn.Module):
         include_input_xyz=True,
         include_input_dir=True,
         use_viewdirs=True,
-        use_alpha=False
+        use_alpha=False,
+        color_channel=3
     ):
         super(FlexibleIRNeRFModel, self).__init__()
 
@@ -280,9 +283,9 @@ class FlexibleIRNeRFModel(torch.nn.Module):
         self.use_alpha = use_alpha
 
         include_input_xyz = 3 * 2 if include_input_xyz else 0
-        include_input_dir = 3 * 2 if include_input_dir else 0
+        include_input_dir = 3 if include_input_dir else 0
         self.dim_xyz = include_input_xyz + 2 * 3 * num_encoding_fn_xyz * 2
-        self.dim_dir = include_input_dir + 2 * 3 * num_encoding_fn_dir * 2
+        self.dim_dir = include_input_dir + 2 * 3 * num_encoding_fn_dir
         self.skip_connect_every = skip_connect_every
         if not use_viewdirs:
             self.dim_dir = 0
@@ -307,15 +310,16 @@ class FlexibleIRNeRFModel(torch.nn.Module):
             )
             if use_alpha:
                 self.fc_alpha = torch.nn.Linear(hidden_size, 1)
-            self.fc_rgb = torch.nn.Linear(hidden_size // 2, 3)
+            self.fc_rgb = torch.nn.Linear(hidden_size // 2, color_channel)
             self.fc_feat = torch.nn.Linear(hidden_size, hidden_size)
         else:
-            self.fc_out = torch.nn.Linear(hidden_size, 3)
+            self.fc_out = torch.nn.Linear(hidden_size, color_channel+1)
 
         self.relu = torch.nn.functional.relu
 
     def forward(self, x):
         if self.use_viewdirs:
+            #print('use')
             xyz, view = x[..., : self.dim_xyz], x[..., self.dim_xyz :]
         else:
             xyz = x[..., : self.dim_xyz]
@@ -345,6 +349,29 @@ class FlexibleIRNeRFModel(torch.nn.Module):
         else:
             return self.fc_out(x)
 
+class RadianceFuseModel(torch.nn.Module):
+    def __init__(
+        self,
+        num_layers=4,
+        hidden_size=128
+    ):
+        super(RadianceFuseModel, self).__init__()
+        self.num_layers = num_layers
+
+        self.layer1 = torch.nn.Linear(2, hidden_size)
+        self.layers_xyz = torch.nn.ModuleList()
+        for i in range(num_layers - 1):
+            self.layers_xyz.append(torch.nn.Linear(hidden_size, hidden_size))
+        self.fc_out = torch.nn.Linear(hidden_size, 1)
+
+        self.relu = torch.nn.functional.relu
+
+    def forward(self, x):
+        x = self.layer1(x)
+        for i in range(len(self.layers_xyz)):
+            x = self.relu(self.layers_xyz[i](x))
+            
+        return self.fc_out(x)
 """
 class EnvironmentModel(torch.nn.Module):
     def __init__(

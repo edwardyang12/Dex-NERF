@@ -160,7 +160,12 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
         intri_n = "intrinsic_l"
         label_n = "labelL.png"
     for s in splits:
+        if debug:
+            test = True if s != "train" else False
+            s = splits[0]
+            
         path = os.path.join(basedir, s)
+        
         imgs = []
         poses = []
         intrinsics = []
@@ -188,11 +193,11 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
             cur_img_off = imageio.imread(fname_off).astype(int)
             #print(type(cur_img), cur_img.dtype)
             #assert 1==0
-            if len(cur_img.shape) != 3:
-                cur_img = np.array(cur_img)[...,None]
-                cur_img = np.concatenate((cur_img, cur_img, cur_img), axis=-1)
-                cur_img_off = np.array(cur_img_off)[...,None]
-                cur_img_off = np.concatenate((cur_img_off, cur_img_off, cur_img_off), axis=-1)
+            #if len(cur_img.shape) != 3:
+            #    cur_img = np.array(cur_img)[...,None]
+            #    cur_img = np.concatenate((cur_img, cur_img, cur_img), axis=-1)
+            #    cur_img_off = np.array(cur_img_off)[...,None]
+            #    cur_img_off = np.concatenate((cur_img_off, cur_img_off, cur_img_off), axis=-1)
                 #print(cur_img.shape)
             H,W = cur_img.shape[:2]
             #print(cur_img.shape)
@@ -212,6 +217,9 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
                 intrinsics.append(intrinsics_c)
             else:
                 intrinsics.append(np.array(meta[intri_n]))
+            
+            if debug and test:
+                break
             
             
             #print(imgs.shape)
@@ -253,30 +261,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
         0,
     )
 
-    # In debug mode, return extremely tiny images
-    if debug:
-        H = H // 32
-        W = W // 32
-        focal = focal / 32.0
-        imgs = [
-            torch.from_numpy(
-                cv2.resize(imgs[i], dsize=(25, 25), interpolation=cv2.INTER_AREA)
-            )
-            for i in range(imgs.shape[0])
-        ]
-        imgs = torch.stack(imgs, 0)
 
-        depths = [
-            torch.from_numpy(
-                cv2.resize(depths[i], dsize=(25, 25), interpolation=cv2.INTER_NEAREST)
-            )
-            for i in range(depths.shape[0])
-        ]
-        depths = torch.stack(depths, 0)
-
-        poses = torch.from_numpy(poses)
-        intrinsics = torch.from_numpy(intrinsics)
-        return imgs, poses, render_poses, [H, W, focal], i_split, intrinsics, depths
 
     if half_res:
         # TODO: resize images using INTER_AREA (cv2)

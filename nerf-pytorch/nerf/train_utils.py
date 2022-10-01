@@ -166,6 +166,7 @@ def run_network_ir_env(network_fn, pts, c_pts, ray_batch, c_ray_batch, chunksize
     c_pts_flat = pts.reshape((-1, c_pts.shape[-1]))
     embedded = embed_fn(pts_flat)
     c_embedded = embed_fn(c_pts_flat)
+    #embedded = c_embedded
     embedded = torch.cat((embedded, c_embedded), dim=-1)
     #print(pts_flat.shape, embedded.shape)
     if embeddirs_fn is not None:
@@ -175,11 +176,11 @@ def run_network_ir_env(network_fn, pts, c_pts, ray_batch, c_ray_batch, chunksize
         embedded_dirs = embeddirs_fn(input_dirs_flat)
         embedded = torch.cat((embedded, embedded_dirs), dim=-1)
 
-        c_viewdirs = c_ray_batch[..., None, -3:]
-        c_input_dirs = c_viewdirs.expand(c_pts.shape)
-        c_input_dirs_flat = c_input_dirs.reshape((-1, c_input_dirs.shape[-1]))
-        c_embedded_dirs = embeddirs_fn(c_input_dirs_flat)
-        embedded = torch.cat((embedded, c_embedded_dirs), dim=-1)
+        #c_viewdirs = c_ray_batch[..., None, -3:]
+        #c_input_dirs = c_viewdirs.expand(c_pts.shape)
+        #c_input_dirs_flat = c_input_dirs.reshape((-1, c_input_dirs.shape[-1]))
+        #c_embedded_dirs = embeddirs_fn(c_input_dirs_flat)
+        #embedded = torch.cat((embedded, c_embedded_dirs), dim=-1)
 
     batches = get_minibatches(embedded, chunksize=chunksize)
     #print(batches[0].shape)
@@ -315,6 +316,7 @@ def predict_and_render_radiance_ir(
     model_fine,
     model_env_coarse,
     model_env_fine,
+    model_fuse,
     options,
     mode="train",
     encode_position_fn=None,
@@ -377,7 +379,11 @@ def predict_and_render_radiance_ir(
         encode_position_fn,
         encode_direction_fn
     )
-    #print(radiance_field.shape)
+
+    radiance_fuse = model_fuse(torch.cat((radiance_field[...,:1],radiance_field_env),dim=-1))
+    #print(radiance_field[...,:1].shape,radiance_field_env.shape,radiance_fuse.shape)
+
+    #assert 1==0
     '''
     coarse_out = volume_render_radiance_field_ir(
         radiance_field,
@@ -390,15 +396,17 @@ def predict_and_render_radiance_ir(
     '''
     coarse_out = volume_render_radiance_field_ir_env(
         radiance_field,
-        radiance_field_env,
+        radiance_fuse,#radiance_field_env
         z_vals,
         rd,
         c_rd,
         radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
         white_background=getattr(options.nerf, mode).white_background,
         m_thres_cand=m_thres_cand,
+        color_channel=1
     )
     rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, weights, depth_coarse = coarse_out[0], coarse_out[1], coarse_out[2], coarse_out[3], coarse_out[4], coarse_out[5]
+    #assert 1==0
     #rgb_coarse_env, disp_coarse_env, acc_coarse_env, weights_env, depth_coarse_env = \
     #    coarse_out_env[0], coarse_out_env[1], coarse_out_env[2], coarse_out_env[3], coarse_out_env[4]
     depth_coarse_dex = list(coarse_out[7:])
@@ -448,6 +456,8 @@ def predict_and_render_radiance_ir(
             encode_position_fn,
             encode_direction_fn,
         )
+
+        radiance_fuse = model_fuse(torch.cat((radiance_field[...,:1],radiance_field_env),dim=-1))
         #rgb_fine, disp_fine, acc_fine, _, _, depth_fine_dex 
         '''
         fine_out = volume_render_radiance_field_ir(
@@ -463,13 +473,14 @@ def predict_and_render_radiance_ir(
         '''
         fine_out = volume_render_radiance_field_ir_env(
             radiance_field,
-            radiance_field_env,
+            radiance_fuse, #radiance_field_env,
             z_vals,
             rd,
             c_rd,
             radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
             white_background=getattr(options.nerf, mode).white_background,
             m_thres_cand=m_thres_cand,
+            color_channel=1
         )
         #print(z_vals[0,:])
         rgb_fine, rgb_off_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2], fine_out[3]
@@ -586,6 +597,7 @@ def run_one_iter_of_nerf_ir(
     model_fine,
     model_env_coarse,
     model_env_fine,
+    model_fuse,
     ray_origins,
     ray_directions,
     cam_origins,
@@ -609,9 +621,10 @@ def run_one_iter_of_nerf_ir(
         cam_viewdirs = cam_viewdirs / cam_viewdirs.norm(p=2, dim=-1).unsqueeze(-1)
         cam_viewdirs = cam_viewdirs.view((-1, 3))
     # Cache shapes now, for later restoration.
+    out_shape = ray_directions[...,0].unsqueeze(-1).shape
     restore_shapes = [
-        ray_directions.shape,
-        ray_directions.shape,
+        out_shape,
+        out_shape,
         ray_directions.shape[:-1],
         ray_directions.shape[:-1],
     ]
@@ -647,6 +660,7 @@ def run_one_iter_of_nerf_ir(
             model_fine,
             model_env_coarse,
             model_env_fine,
+            model_fuse,
             options,
             mode=mode,
             encode_position_fn=encode_position_fn,
