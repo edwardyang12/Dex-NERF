@@ -460,7 +460,7 @@ def main():
 
         loss_off = coarse_loss_off + fine_loss_off
         #print(fine_loss.item(), fine_normal_loss.item())
-        loss = fine_loss + fine_normal_loss
+        loss = fine_loss# + fine_normal_loss
 
         optimizer.zero_grad()
 

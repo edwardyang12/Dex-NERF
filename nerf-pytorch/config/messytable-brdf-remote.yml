@@ -3,7 +3,7 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: ../logs_sim_brdf
+  logdir: /jianyu-fast-vol/nerf-obj/logs_sim_brdf_no_normal
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
@@ -22,11 +22,11 @@ dataset:
   # Type of dataset (Blender vs LLFF vs DeepVoxels vs something else)
   type: blender
   # Base directory of dataset.
-  basedir: /media/jianyu/dataset/messy-table-dataset/nerf-sim-patcam-align
+  basedir: /messytable-slow-vol/messy-table-dataset/nerf-sim-patcam-align/
   is_real_rgb: False
   # Optionally, provide a path to the pre-cached dataset dir. This
   # overrides the other dataset options.
-  cachedir: /media/jianyu/dataset/messy-table-dataset/cache
+  cachedir: /messytable-slow-vol/messy-table-dataset/nerf-sim-patcam-align/cache
   # For the Blender datasets (synthetic), optionally return images
   # at half the original resolution of 800 x 800, to save space.
   imgname: 0128_irL_kuafu_half.png
