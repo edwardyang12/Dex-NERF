@@ -4,7 +4,9 @@ import numpy as np
 
 from .nerf_helpers import get_minibatches, ndc_rays
 from .nerf_helpers import sample_pdf_2 as sample_pdf
-from .volume_rendering_utils import volume_render_radiance_field, volume_render_radiance_field_ir, volume_render_radiance_field_ir_env
+from .volume_rendering_utils import volume_render_radiance_field, \
+    volume_render_radiance_field_ir, volume_render_radiance_field_ir_env,volume_render_reflectance_field
+
 
 def compute_err_metric(depth_gt, depth_pred, mask):
     """
@@ -161,14 +163,17 @@ def run_network_ir(network_fn, pts, ray_batch, chunksize, embed_fn, embeddirs_fn
     return radiance_field
 
 def run_network_ir_env(network_fn, pts, c_pts, ray_batch, c_ray_batch, chunksize, embed_fn, embeddirs_fn):
-
+    
     pts_flat = pts.reshape((-1, pts.shape[-1]))
-    c_pts_flat = pts.reshape((-1, c_pts.shape[-1]))
+    c_pts_flat = c_pts.reshape((-1, c_pts.shape[-1]))
     embedded = embed_fn(pts_flat)
-    c_embedded = embed_fn(c_pts_flat)
+    #print(embedded.shape)
+    #assert 1==0
+    #c_embedded = embed_fn(c_pts_flat)
     #embedded = c_embedded
-    embedded = torch.cat((embedded, c_embedded), dim=-1)
+    #embedded = torch.cat((embedded, c_embedded), dim=-1)
     #print(pts_flat.shape, embedded.shape)
+    """
     if embeddirs_fn is not None:
         viewdirs = ray_batch[..., None, -3:]
         input_dirs = viewdirs.expand(pts.shape)
@@ -176,12 +181,16 @@ def run_network_ir_env(network_fn, pts, c_pts, ray_batch, c_ray_batch, chunksize
         embedded_dirs = embeddirs_fn(input_dirs_flat)
         embedded = torch.cat((embedded, embedded_dirs), dim=-1)
 
-        #c_viewdirs = c_ray_batch[..., None, -3:]
-        #c_input_dirs = c_viewdirs.expand(c_pts.shape)
-        #c_input_dirs_flat = c_input_dirs.reshape((-1, c_input_dirs.shape[-1]))
-        #c_embedded_dirs = embeddirs_fn(c_input_dirs_flat)
-        #embedded = torch.cat((embedded, c_embedded_dirs), dim=-1)
-
+        c_viewdirs = c_ray_batch[..., None, -3:]
+        c_input_dirs = c_viewdirs.expand(c_pts.shape)
+        c_input_dirs_flat = c_input_dirs.reshape((-1, c_input_dirs.shape[-1]))
+        c_embedded_dirs = embeddirs_fn(c_input_dirs_flat)
+        embedded = torch.cat((embedded, c_embedded_dirs), dim=-1)
+    """
+    #print("before", pts_flat[0,:], c_pts_flat[0,:], viewdirs[0,:], c_viewdirs[0,:])
+    #print(pts_flat[0,:],c_pts_flat[0,:],viewdirs[0,:], c_pts_flat.shape)
+    #print(embedded.shape)
+    #assert 1==0
     batches = get_minibatches(embedded, chunksize=chunksize)
     #print(batches[0].shape)
     #assert 1==0
@@ -191,6 +200,22 @@ def run_network_ir_env(network_fn, pts, c_pts, ray_batch, c_ray_batch, chunksize
         list(pts.shape[:-1]) + [radiance_field.shape[-1]]
     )
     return radiance_field
+
+def run_network_ir_reflectance_env(network_fn, pts, chunksize, embed_fn, embeddirs_fn):
+
+    pts_flat = pts.reshape((-1, pts.shape[-1]))
+
+    embedded = embed_fn(pts_flat)
+ 
+    batches = get_minibatches(embedded, chunksize=chunksize)
+    #print(batches[0].shape)
+    #assert 1==0
+    preds = [network_fn(batch) for batch in batches]
+    refectance_field = torch.cat(preds, dim=0)
+    refectance_field = refectance_field.reshape(
+        list(pts.shape[:-1]) + [refectance_field.shape[-1]]
+    )
+    return refectance_field
 
 
 def predict_and_render_radiance(
@@ -316,7 +341,212 @@ def predict_and_render_radiance_ir(
     model_fine,
     model_env_coarse,
     model_env_fine,
-    model_fuse,
+    #model_fuse,
+    options,
+    mode="train",
+    encode_position_fn=None,
+    encode_direction_fn=None,
+    m_thres_cand=None
+):
+
+    # TESTED
+    
+    #assert 1==0
+    num_rays = ray_batch.shape[0]
+    ro, rd, c_ro, c_rd = ray_batch[..., :3], ray_batch[..., 3:6], ray_batch[..., 6:9], ray_batch[..., 9:12]
+    bounds = ray_batch[..., 12:14].view((-1, 1, 2))
+    near, far = bounds[..., 0], bounds[..., 1]
+    idx = ray_batch[...,14:16].type(torch.long)
+    #print(ray_batch.shape, idx.shape)
+    # TODO: Use actual values for "near" and "far" (instead of 0. and 1.)
+    # when not enabling "ndc".
+    t_vals = torch.linspace(
+        0.0,
+        1.0,
+        getattr(options.nerf, mode).num_coarse,
+        dtype=ro.dtype,
+        device=ro.device,
+    )
+    if not getattr(options.nerf, mode).lindisp:
+        #print("enter")
+        z_vals = near * (1.0 - t_vals) + far * t_vals
+    else:
+        z_vals = 1.0 / (1.0 / near * (1.0 - t_vals) + 1.0 / far * t_vals)
+    z_vals = z_vals.expand([num_rays, getattr(options.nerf, mode).num_coarse])
+    
+
+    if getattr(options.nerf, mode).perturb:
+        # Get intervals between samples.
+        mids = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
+        upper = torch.cat((mids, z_vals[..., -1:]), dim=-1)
+        lower = torch.cat((z_vals[..., :1], mids), dim=-1)
+        # Stratified samples in those intervals.
+        t_rand = torch.rand(z_vals.shape, dtype=ro.dtype, device=ro.device)
+        z_vals = lower + (upper - lower) * t_rand
+    # pts -> (num_rays, N_samples, 3)
+    #print(z_vals.shape)
+    pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
+    c_pts = c_ro[..., None, :] + c_rd[..., None, :] * z_vals[..., :, None]
+
+    radiance_field = run_network_ir(
+        model_coarse,
+        pts,
+        ray_batch[..., -6:-3],
+        getattr(options.nerf, mode).chunksize,
+        encode_position_fn,
+        encode_direction_fn
+    )
+    """
+    radiance_field_env = run_network_ir_env(
+        model_env_coarse,
+        pts,
+        c_pts,
+        ray_batch[..., -6:-3],
+        ray_batch[..., -3:],
+        getattr(options.nerf, mode).chunksize,
+        encode_position_fn,
+        encode_direction_fn
+    )
+    """
+    radiance_field_env = None
+
+    #print(radiance_field_env.shape)
+    #assert 1==0
+
+    #radiance_fuse = model_fuse(torch.cat((radiance_field[...,:1],radiance_field_env),dim=-1))
+    #print(radiance_field[...,:1].shape,radiance_field_env.shape,radiance_fuse.shape)
+
+    #assert 1==0
+    '''
+    coarse_out = volume_render_radiance_field_ir(
+        radiance_field,
+        z_vals,
+        rd,
+        radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
+        white_background=getattr(options.nerf, mode).white_background,
+        m_thres_cand=m_thres_cand
+    )
+    '''
+    coarse_out = volume_render_radiance_field_ir_env(
+        radiance_field,
+        radiance_field_env,
+        z_vals,
+        rd,
+        c_rd,
+        model_env_coarse,
+        radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
+        white_background=getattr(options.nerf, mode).white_background,
+        m_thres_cand=m_thres_cand,
+        color_channel=1,
+        idx=idx
+    )
+    rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, weights, depth_coarse = coarse_out[0], coarse_out[1], coarse_out[2], coarse_out[3], coarse_out[4], coarse_out[5]
+    #assert 1==0
+    #rgb_coarse_env, disp_coarse_env, acc_coarse_env, weights_env, depth_coarse_env = \
+    #    coarse_out_env[0], coarse_out_env[1], coarse_out_env[2], coarse_out_env[3], coarse_out_env[4]
+    depth_coarse_dex = list(coarse_out[7:])
+    #depth_coarse_dex_env = list(coarse_out_env[6:])
+
+    #print(torch.min(rgb_coarse), torch.max(rgb_coarse))
+    #assert 1==0
+    #rgb_coarse_final = torch.clip(rgb_coarse + rgb_coarse_env,0.,1.)
+
+    rgb_fine, disp_fine, acc_fine = None, None, None
+    if getattr(options.nerf, mode).num_fine > 0:
+        # rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
+
+        z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
+        z_samples = sample_pdf(
+            z_vals_mid,
+            weights[..., 1:-1],
+            getattr(options.nerf, mode).num_fine,
+            det=(getattr(options.nerf, mode).perturb == 0.0),
+        )
+        z_samples = z_samples.detach()
+        #print(z_samples[0,:])
+
+        z_vals, _ = torch.sort(torch.cat((z_vals, z_samples), dim=-1), dim=-1)
+        
+        #print(z_samples[0,:])
+        # pts -> (N_rays, N_samples + N_importance, 3)
+        pts_fine = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
+        c_pts_fine = c_ro[..., None, :] + c_rd[..., None, :] * z_vals[..., :, None]
+
+        radiance_field = run_network_ir(
+            model_fine,
+            pts_fine,
+            ray_batch[..., -6:-3],
+            getattr(options.nerf, mode).chunksize,
+            encode_position_fn,
+            encode_direction_fn,
+        )
+
+        radiance_field_env = run_network_ir_env(
+            model_env_fine,
+            pts_fine,
+            c_pts_fine,
+            ray_batch[..., -6:-3],
+            ray_batch[..., -3:],
+            getattr(options.nerf, mode).chunksize,
+            encode_position_fn,
+            encode_direction_fn,
+        )
+
+        #radiance_fuse = model_fuse(torch.cat((radiance_field[...,:1],radiance_field_env),dim=-1))
+        #rgb_fine, disp_fine, acc_fine, _, _, depth_fine_dex 
+        '''
+        fine_out = volume_render_radiance_field_ir(
+            radiance_field,
+            z_vals,
+            rd,
+            radiance_field_noise_std=getattr(
+                options.nerf, mode
+            ).radiance_field_noise_std,
+            white_background=getattr(options.nerf, mode).white_background,
+            m_thres_cand=m_thres_cand
+        )
+        '''
+        fine_out = volume_render_radiance_field_ir_env(
+            radiance_field,
+            radiance_field_env,
+            z_vals,
+            rd,
+            c_rd,
+            model_env_fine,
+            radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
+            white_background=getattr(options.nerf, mode).white_background,
+            m_thres_cand=m_thres_cand,
+            color_channel=1,
+            idx=idx
+        )
+        #print(z_vals[0,:])
+        rgb_fine, rgb_off_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2], fine_out[3]
+        normal_fine, albedo_fine, roughness_fine = fine_out[7], fine_out[8], fine_out[9]
+        depth_fine_nerf = fine_out[5]
+        alpha_fine = fine_out[6]
+
+        #rgb_fine_env, disp_fine_env, acc_fine_env, depth_fine_env = \
+        #fine_out_env[0], fine_out_env[1], fine_out_env[2], fine_out_env[4]
+        #print(alpha_fine[500,:])
+        depth_fine_dex = list(fine_out[10:])
+        #rgb_fine_final = torch.clip(rgb_fine + rgb_fine_env,0.,1.)
+        #print(depth_fine_nerf.shape, alpha_fine.shape, rgb_coarse.shape)
+    #print(acc_fine.shape)
+    #print(alpha_fine.shape)
+    #assert 1==0
+    out = [rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, \
+        rgb_fine, rgb_off_fine, disp_fine, acc_fine, depth_fine_nerf, \
+        alpha_fine, normal_fine, albedo_fine, roughness_fine] + depth_fine_dex
+    return tuple(out)
+
+def predict_and_render_reflectance_ir(
+    ray_batch,
+    sceneid,
+    model_coarse,
+    model_fine,
+    model_env,
+    SGrender,
+    #model_fuse,
     options,
     mode="train",
     encode_position_fn=None,
@@ -360,56 +590,34 @@ def predict_and_render_radiance_ir(
     pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
     c_pts = c_ro[..., None, :] + c_rd[..., None, :] * z_vals[..., :, None]
 
-    radiance_field = run_network_ir(
+
+
+    reflectance_field_env = run_network_ir_reflectance_env(
         model_coarse,
         pts,
-        ray_batch[..., -6:-3],
         getattr(options.nerf, mode).chunksize,
         encode_position_fn,
         encode_direction_fn
     )
 
-    radiance_field_env = run_network_ir_env(
-        model_env_coarse,
-        pts,
-        c_pts,
-        ray_batch[..., -6:-3],
-        ray_batch[..., -3:],
-        getattr(options.nerf, mode).chunksize,
-        encode_position_fn,
-        encode_direction_fn
-    )
+    sg_param = model_env(sceneid)
 
-    radiance_fuse = model_fuse(torch.cat((radiance_field[...,:1],radiance_field_env),dim=-1))
-    #print(radiance_field[...,:1].shape,radiance_field_env.shape,radiance_fuse.shape)
-
-    #assert 1==0
-    '''
-    coarse_out = volume_render_radiance_field_ir(
-        radiance_field,
+    coarse_out = volume_render_reflectance_field(
+        reflectance_field_env,
+        SGrender,
+        sg_param,
         z_vals,
         rd,
-        radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
-        white_background=getattr(options.nerf, mode).white_background,
-        m_thres_cand=m_thres_cand
-    )
-    '''
-    coarse_out = volume_render_radiance_field_ir_env(
-        radiance_field,
-        radiance_fuse,#radiance_field_env
-        z_vals,
-        rd,
-        c_rd,
         radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
         white_background=getattr(options.nerf, mode).white_background,
         m_thres_cand=m_thres_cand,
         color_channel=1
     )
-    rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, weights, depth_coarse = coarse_out[0], coarse_out[1], coarse_out[2], coarse_out[3], coarse_out[4], coarse_out[5]
+    rgb_coarse, disp_coarse, acc_coarse, weights, depth_coarse = coarse_out[0], coarse_out[1], coarse_out[2], coarse_out[3], coarse_out[4]
     #assert 1==0
     #rgb_coarse_env, disp_coarse_env, acc_coarse_env, weights_env, depth_coarse_env = \
     #    coarse_out_env[0], coarse_out_env[1], coarse_out_env[2], coarse_out_env[3], coarse_out_env[4]
-    depth_coarse_dex = list(coarse_out[7:])
+    depth_coarse_dex = list(coarse_out[6:])
     #depth_coarse_dex_env = list(coarse_out_env[6:])
 
     #print(torch.min(rgb_coarse), torch.max(rgb_coarse))
@@ -417,87 +625,76 @@ def predict_and_render_radiance_ir(
     #rgb_coarse_final = torch.clip(rgb_coarse + rgb_coarse_env,0.,1.)
 
     rgb_fine, disp_fine, acc_fine = None, None, None
-    if getattr(options.nerf, mode).num_fine > 0:
-        # rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
 
-        z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
-        z_samples = sample_pdf(
-            z_vals_mid,
-            weights[..., 1:-1],
-            getattr(options.nerf, mode).num_fine,
-            det=(getattr(options.nerf, mode).perturb == 0.0),
-        )
-        z_samples = z_samples.detach()
-        #print(z_samples[0,:])
+    # rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
 
-        z_vals, _ = torch.sort(torch.cat((z_vals, z_samples), dim=-1), dim=-1)
-        
-        #print(z_samples[0,:])
-        # pts -> (N_rays, N_samples + N_importance, 3)
-        pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
-        c_pts = c_ro[..., None, :] + c_rd[..., None, :] * z_vals[..., :, None]
+    z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
+    z_samples = sample_pdf(
+        z_vals_mid,
+        weights[..., 1:-1],
+        getattr(options.nerf, mode).num_fine,
+        det=(getattr(options.nerf, mode).perturb == 0.0),
+    )
+    z_samples = z_samples.detach()
+    #print(z_samples[0,:])
 
-        radiance_field = run_network_ir(
-            model_fine,
-            pts,
-            ray_batch[..., -6:-3],
-            getattr(options.nerf, mode).chunksize,
-            encode_position_fn,
-            encode_direction_fn,
-        )
+    z_vals, _ = torch.sort(torch.cat((z_vals, z_samples), dim=-1), dim=-1)
+    
+    #print(z_samples[0,:])
+    # pts -> (N_rays, N_samples + N_importance, 3)
+    pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
+    c_pts = c_ro[..., None, :] + c_rd[..., None, :] * z_vals[..., :, None]
 
-        radiance_field_env = run_network_ir_env(
-            model_env_fine,
-            pts,
-            c_pts,
-            ray_batch[..., -6:-3],
-            ray_batch[..., -3:],
-            getattr(options.nerf, mode).chunksize,
-            encode_position_fn,
-            encode_direction_fn,
-        )
 
-        radiance_fuse = model_fuse(torch.cat((radiance_field[...,:1],radiance_field_env),dim=-1))
-        #rgb_fine, disp_fine, acc_fine, _, _, depth_fine_dex 
-        '''
-        fine_out = volume_render_radiance_field_ir(
-            radiance_field,
-            z_vals,
-            rd,
-            radiance_field_noise_std=getattr(
-                options.nerf, mode
-            ).radiance_field_noise_std,
-            white_background=getattr(options.nerf, mode).white_background,
-            m_thres_cand=m_thres_cand
-        )
-        '''
-        fine_out = volume_render_radiance_field_ir_env(
-            radiance_field,
-            radiance_fuse, #radiance_field_env,
-            z_vals,
-            rd,
-            c_rd,
-            radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
-            white_background=getattr(options.nerf, mode).white_background,
-            m_thres_cand=m_thres_cand,
-            color_channel=1
-        )
-        #print(z_vals[0,:])
-        rgb_fine, rgb_off_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2], fine_out[3]
-        depth_fine_nerf = fine_out[5]
-        alpha_fine = fine_out[6]
 
-        #rgb_fine_env, disp_fine_env, acc_fine_env, depth_fine_env = \
-        #fine_out_env[0], fine_out_env[1], fine_out_env[2], fine_out_env[4]
-        #print(alpha_fine[500,:])
-        depth_fine_dex = list(fine_out[7:])
-        #rgb_fine_final = torch.clip(rgb_fine + rgb_fine_env,0.,1.)
-        #print(depth_fine_nerf.shape, alpha_fine.shape, rgb_coarse.shape)
+    reflectance_field_env = run_network_ir_reflectance_env(
+        model_fine,
+        pts,
+        getattr(options.nerf, mode).chunksize,
+        encode_position_fn,
+        encode_direction_fn,
+    )
+
+    #radiance_fuse = model_fuse(torch.cat((radiance_field[...,:1],radiance_field_env),dim=-1))
+    #rgb_fine, disp_fine, acc_fine, _, _, depth_fine_dex 
+    '''
+    fine_out = volume_render_radiance_field_ir(
+        radiance_field,
+        z_vals,
+        rd,
+        radiance_field_noise_std=getattr(
+            options.nerf, mode
+        ).radiance_field_noise_std,
+        white_background=getattr(options.nerf, mode).white_background,
+        m_thres_cand=m_thres_cand
+    )
+    '''
+    fine_out = volume_render_reflectance_field(
+        reflectance_field_env,
+        SGrender,
+        sg_param,
+        z_vals,
+        rd,
+        radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
+        white_background=getattr(options.nerf, mode).white_background,
+        m_thres_cand=m_thres_cand,
+        color_channel=1
+    )
+    #print(z_vals[0,:])
+    rgb_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2]
+    depth_fine_nerf = fine_out[4]
+
+    #rgb_fine_env, disp_fine_env, acc_fine_env, depth_fine_env = \
+    #fine_out_env[0], fine_out_env[1], fine_out_env[2], fine_out_env[4]
+    #print(alpha_fine[500,:])
+    depth_fine_dex = list(fine_out[6:])
+    #rgb_fine_final = torch.clip(rgb_fine + rgb_fine_env,0.,1.)
+    #print(depth_fine_nerf.shape, alpha_fine.shape, rgb_coarse.shape)
     #print(acc_fine.shape)
-    out = [rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, \
-        rgb_fine, rgb_off_fine, disp_fine, acc_fine, depth_fine_nerf, \
-        alpha_fine] + depth_fine_dex
+    out = [rgb_coarse, disp_coarse, acc_coarse, \
+        rgb_fine, disp_fine, acc_fine, depth_fine_nerf] + depth_fine_dex
     return tuple(out)
+
 
 
 
@@ -597,7 +794,120 @@ def run_one_iter_of_nerf_ir(
     model_fine,
     model_env_coarse,
     model_env_fine,
-    model_fuse,
+    #model_fuse,
+    ray_origins,
+    ray_directions,
+    cam_origins,
+    cam_directions,
+    options,
+    mode="train",
+    encode_position_fn=None,
+    encode_direction_fn=None,
+    m_thres_cand=None,
+    idx=None
+):
+    viewdirs = None
+    #print(ray_directions.shape, ray_origins.shape)
+    
+    if options.nerf.use_viewdirs:
+        # Provide ray directions as input
+        viewdirs = ray_directions
+        viewdirs = viewdirs / viewdirs.norm(p=2, dim=-1).unsqueeze(-1)
+        viewdirs = viewdirs.view((-1, 3))
+
+        cam_viewdirs = cam_directions
+        cam_viewdirs = cam_viewdirs / cam_viewdirs.norm(p=2, dim=-1).unsqueeze(-1)
+        cam_viewdirs = cam_viewdirs.view((-1, 3))
+    # Cache shapes now, for later restoration.
+    out_shape = ray_directions[...,0].unsqueeze(-1).shape
+    restore_shapes = [
+        out_shape,
+        out_shape,
+        ray_directions.shape[:-1],
+        ray_directions.shape[:-1],
+    ]
+    if model_fine:
+        restore_shapes += restore_shapes
+        restore_shapes += [ray_directions.shape[:-1]]
+        #print(out_shape)
+        #assert 1==0
+        #print(ray_directions.shape)
+        restore_shapes += [torch.Size([270,480,128])]
+        restore_shapes += [torch.Size([270,480,3])]
+        restore_shapes += [torch.Size([270,480])]
+        restore_shapes += [torch.Size([270,480])]
+        for i in m_thres_cand:
+            restore_shapes += [ray_directions.shape[:-1]]
+    #print(len(restore_shapes), ray_directions.shape[:-1])
+    if options.dataset.no_ndc is False:
+        #print("no_ndc")
+        ro, rd = ndc_rays(height, width, focal_length, 1.0, ray_origins, ray_directions)
+        ro = ro.view((-1, 3))
+        rd = rd.view((-1, 3))
+    else:
+        ro = ray_origins.view((-1, 3))
+        rd = ray_directions.view((-1, 3))
+        c_ro = cam_origins.view((-1, 3))
+        c_rd = cam_directions.view((-1, 3))
+    near = options.dataset.near * torch.ones_like(rd[..., :1])
+    far = options.dataset.far * torch.ones_like(rd[..., :1])
+    rays = torch.cat((ro, rd, c_ro, c_rd, near, far, idx), dim=-1)
+    #print(rays.shape)
+    #assert 1==0
+    if options.nerf.use_viewdirs:
+        rays = torch.cat((rays, viewdirs, cam_viewdirs), dim=-1)
+
+    batches = get_minibatches(rays, chunksize=getattr(options.nerf, mode).chunksize)
+    pred = [
+        predict_and_render_radiance_ir(
+            batch,
+            model_coarse,
+            model_fine,
+            model_env_coarse,
+            model_env_fine,
+            #model_fuse,
+            options,
+            mode=mode,
+            encode_position_fn=encode_position_fn,
+            encode_direction_fn=encode_direction_fn,
+            m_thres_cand=m_thres_cand
+        )
+        for batch in batches
+    ]
+    #assert 1==0
+    synthesized_images = list(zip(*pred))
+    synthesized_images = [
+        torch.cat(image, dim=0) if image[0] is not None else (None)
+        for image in synthesized_images
+    ]
+    #print(len(synthesized_images), len(restore_shapes))
+    if mode == "validation":
+        synthesized_images = [
+            image.view(shape) if image is not None else None
+            for (image, shape) in zip(synthesized_images, restore_shapes)
+        ]
+
+        # Returns rgb_coarse, disp_coarse, acc_coarse, rgb_fine, disp_fine, acc_fine
+        # (assuming both the coarse and fine networks are used).
+        if model_fine:
+            return tuple(synthesized_images)
+        else:
+            # If the fine network is not used, rgb_fine, disp_fine, acc_fine are
+            # set to None.
+            return tuple(synthesized_images + [None, None, None])
+
+    return tuple(synthesized_images)
+
+def run_one_iter_of_neRF(
+    height,
+    width,
+    focal_length,
+    sceneid,
+    model_coarse,
+    model_fine,
+    model_env,
+    SGrender,
+    #model_fuse,
     ray_origins,
     ray_directions,
     cam_origins,
@@ -654,13 +964,14 @@ def run_one_iter_of_nerf_ir(
 
     batches = get_minibatches(rays, chunksize=getattr(options.nerf, mode).chunksize)
     pred = [
-        predict_and_render_radiance_ir(
+        predict_and_render_reflectance_ir(
             batch,
+            sceneid,
             model_coarse,
             model_fine,
-            model_env_coarse,
-            model_env_fine,
-            model_fuse,
+            model_env,
+            SGrender,
+            #model_fuse,
             options,
             mode=mode,
             encode_position_fn=encode_position_fn,
