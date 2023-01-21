@@ -236,7 +236,7 @@ def main():
     # # TODO: Prepare raybatch tensor if batching random rays
     #no_ir_train = True
     #jointtrain = False
-    is_relight = False
+    is_joint = False
 
     #prev_params = list(model_env_fine.parameters())
 
@@ -364,11 +364,14 @@ def main():
                 encode_position_fn=encode_position_fn,
                 encode_direction_fn=encode_direction_fn,
                 m_thres_cand=m_thres_cand,
-                idx=select_inds
+                idx=select_inds,
+                joint=is_joint
             )
             rgb_coarse, rgb_off_coarse, rgb_fine, rgb_off_fine = nerf_out[0], nerf_out[1], nerf_out[4], nerf_out[5]
             alpha_fine = nerf_out[9]
             normal_fine = nerf_out[10]
+            normals_diff_map = nerf_out[13]
+            d_n_map = nerf_out[14]
 
             #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
             #rgb_fine = torch.mean(rgb_fine, dim=-1)
@@ -381,7 +384,7 @@ def main():
         #if i == cfg.experiment.finetune_start:
         #    no_ir_train = False
         if i == cfg.experiment.jointtrain_start:
-            is_relight = True
+            is_joint = True
         coarse_loss = 0.0
         #print(torch.max(model_env_fine.ir_pattern))
 
@@ -454,20 +457,31 @@ def main():
         fine_loss_off = torch.nn.functional.mse_loss(
             rgb_off_fine, target_ray_values_off
         )
-        fine_normal_loss = torch.nn.functional.mse_loss(
-            normal_fine, target_n*(-1.)
+        d_normal_loss_gt = torch.nn.functional.mse_loss(
+            d_n_map, target_n
         )
+        fine_normal_loss_gt = torch.nn.functional.mse_loss(
+            normal_fine, target_n
+        )
+        #print(d_n_map.shape, (target_n*(-1.)).shape)
+        #assert 1==0
+        fine_normal_loss = normals_diff_map.mean()
+        #print(fine_normal_loss)
+
+        if i < 10000:
+            fine_normal_loss = fine_normal_loss*0.
 
         loss_off = coarse_loss_off + fine_loss_off
         #print(fine_loss.item(), fine_normal_loss.item())
-        loss = fine_loss# + fine_normal_loss
+        loss = fine_loss + 0.1*fine_normal_loss
+        loss_t = loss + loss_off
 
         optimizer.zero_grad()
 
         optimizer_env.zero_grad()
-        loss.backward()
-        loss_off.backward()
-        
+        #loss.backward()
+        #loss_off.backward()
+        loss_t.backward()
         psnr = mse2psnr(loss.item())
         #if no_ir_train == True or jointtrain == True:
         optimizer.step()
@@ -511,6 +525,9 @@ def main():
         writer.add_scalar("train/coarse_loss_off", coarse_loss_off.item(), i)
         writer.add_scalar("train/fine_loss", fine_loss.item(), i)
         writer.add_scalar("train/fine_loss_off", fine_loss_off.item(), i)
+        writer.add_scalar("train/fine_normal_diff_loss", fine_normal_loss.item(), i)
+        writer.add_scalar("train/fine_normal_loss_gt", fine_normal_loss_gt.item(), i)
+        writer.add_scalar("train/d_normal_loss_gt", d_normal_loss_gt.item(), i)
         writer.add_scalar("train/psnr", psnr, i)
 
         #print(torch.max(model_env_fine.ir_pattern))
@@ -605,7 +622,8 @@ def main():
                     rgb_coarse, rgb_coarse_off, rgb_fine, rgb_fine_off = nerf_out[0], nerf_out[1], nerf_out[4], nerf_out[5]
                     depth_fine_nerf = nerf_out[8]
                     normal_fine, albedo_fine, roughness_fine = nerf_out[10], nerf_out[11], nerf_out[12]
-                    depth_fine_dex = list(nerf_out[13:])
+                    #normals_diff_map = nerf_out[13]
+                    depth_fine_dex = list(nerf_out[15:])
                     target_ray_values = img_target.unsqueeze(-1)
                     #print(rgb_coarse.shape,rgb_fine.shape, target_ray_values.shape)
                     #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
@@ -639,7 +657,7 @@ def main():
                 if rgb_fine is not None:
                     normal_fine = normal_fine.permute(2,0,1)
                     normal_fine = (normal_fine.clone().detach()*0.5+0.5)
-                    normal_target = normal_target.permute(2,0,1)*(-1.)
+                    normal_target = normal_target.permute(2,0,1)
                     normal_target = (normal_target.clone().detach()*0.5+0.5)
                     
                     #print(torch.max(albedo_fine), torch.min(albedo_fine), torch.max(roughness_fine), torch.min(roughness_fine))

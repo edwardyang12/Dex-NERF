@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+import copy
 
 from .nerf_helpers import get_minibatches, ndc_rays
 from .nerf_helpers import sample_pdf_2 as sample_pdf
@@ -153,13 +154,14 @@ def run_network_ir(network_fn, pts, ray_batch, chunksize, embed_fn, embeddirs_fn
         embedded = torch.cat((embedded, embedded_dirs), dim=-1)
 
     batches = get_minibatches(embedded, chunksize=chunksize)
-    #print(batches[0].shape)
-    #assert 1==0
+
     preds = [network_fn(batch) for batch in batches]
+    #preds = network_fn(embedded[:chunksize])
     radiance_field = torch.cat(preds, dim=0)
     radiance_field = radiance_field.reshape(
         list(pts.shape[:-1]) + [radiance_field.shape[-1]]
     )
+
     return radiance_field
 
 def run_network_ir_env(network_fn, pts, c_pts, ray_batch, c_ray_batch, chunksize, embed_fn, embeddirs_fn):
@@ -346,7 +348,8 @@ def predict_and_render_radiance_ir(
     mode="train",
     encode_position_fn=None,
     encode_direction_fn=None,
-    m_thres_cand=None
+    m_thres_cand=None,
+    joint=False
 ):
 
     # TESTED
@@ -438,7 +441,10 @@ def predict_and_render_radiance_ir(
         white_background=getattr(options.nerf, mode).white_background,
         m_thres_cand=m_thres_cand,
         color_channel=1,
-        idx=idx
+        idx=idx,
+        d_n=None,
+        joint=joint
+
     )
     rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, weights, depth_coarse = coarse_out[0], coarse_out[1], coarse_out[2], coarse_out[3], coarse_out[4], coarse_out[5]
     #assert 1==0
@@ -480,6 +486,39 @@ def predict_and_render_radiance_ir(
             encode_position_fn,
             encode_direction_fn,
         )
+        derived_normals = None
+        if mode == 'train':
+            pts_fine_grad = pts_fine.clone().detach()
+            pts_fine_grad.requires_grad = True
+            model_fine_temp = copy.deepcopy(model_fine)
+            model_fine_temp.cuda().train()
+            ray_batch_grad = ray_batch[..., -6:-3].clone().detach()
+            radiance_field_grad = run_network_ir(
+                model_fine_temp,
+                pts_fine_grad,
+                ray_batch_grad,
+                getattr(options.nerf, mode).chunksize,
+                encode_position_fn,
+                encode_direction_fn,
+            )
+            #print(pts_fine.requires_grad)
+            #assert 1==0
+            sigma = torch.nn.functional.relu(radiance_field_grad[..., 1])
+
+            d_output = torch.ones_like(sigma, requires_grad=False, device=sigma.device)
+            gradients = torch.autograd.grad(
+                                        outputs=sigma,
+                                        inputs=pts_fine_grad,
+                                        grad_outputs=d_output,
+                                        create_graph=True,
+                                        retain_graph=True,
+                                        only_inputs=True
+                                        )[0]
+            #print(gradients.shape)
+                                    
+            derived_normals = -F.normalize(gradients, p=2, dim=-1, eps=1e-6)
+            derived_normals = derived_normals.view(-1, 3)
+        
 
         radiance_field_env = run_network_ir_env(
             model_env_fine,
@@ -517,18 +556,21 @@ def predict_and_render_radiance_ir(
             white_background=getattr(options.nerf, mode).white_background,
             m_thres_cand=m_thres_cand,
             color_channel=1,
-            idx=idx
+            idx=idx,
+            d_n=derived_normals,
+            joint=joint
         )
         #print(z_vals[0,:])
         rgb_fine, rgb_off_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2], fine_out[3]
         normal_fine, albedo_fine, roughness_fine = fine_out[7], fine_out[8], fine_out[9]
         depth_fine_nerf = fine_out[5]
         alpha_fine = fine_out[6]
+        normals_diff_map, d_n_map = fine_out[10], fine_out[11]
 
         #rgb_fine_env, disp_fine_env, acc_fine_env, depth_fine_env = \
         #fine_out_env[0], fine_out_env[1], fine_out_env[2], fine_out_env[4]
         #print(alpha_fine[500,:])
-        depth_fine_dex = list(fine_out[10:])
+        depth_fine_dex = list(fine_out[12:])
         #rgb_fine_final = torch.clip(rgb_fine + rgb_fine_env,0.,1.)
         #print(depth_fine_nerf.shape, alpha_fine.shape, rgb_coarse.shape)
     #print(acc_fine.shape)
@@ -536,7 +578,7 @@ def predict_and_render_radiance_ir(
     #assert 1==0
     out = [rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, \
         rgb_fine, rgb_off_fine, disp_fine, acc_fine, depth_fine_nerf, \
-        alpha_fine, normal_fine, albedo_fine, roughness_fine] + depth_fine_dex
+        alpha_fine, normal_fine, albedo_fine, roughness_fine, normals_diff_map, d_n_map] + depth_fine_dex
     return tuple(out)
 
 def predict_and_render_reflectance_ir(
@@ -804,7 +846,8 @@ def run_one_iter_of_nerf_ir(
     encode_position_fn=None,
     encode_direction_fn=None,
     m_thres_cand=None,
-    idx=None
+    idx=None,
+    joint=False
 ):
     viewdirs = None
     #print(ray_directions.shape, ray_origins.shape)
@@ -836,6 +879,8 @@ def run_one_iter_of_nerf_ir(
         restore_shapes += [torch.Size([270,480,3])]
         restore_shapes += [torch.Size([270,480])]
         restore_shapes += [torch.Size([270,480])]
+        restore_shapes += [torch.Size([270,480])]
+        restore_shapes += [torch.Size([270,480,3])]
         for i in m_thres_cand:
             restore_shapes += [ray_directions.shape[:-1]]
     #print(len(restore_shapes), ray_directions.shape[:-1])
@@ -870,7 +915,8 @@ def run_one_iter_of_nerf_ir(
             mode=mode,
             encode_position_fn=encode_position_fn,
             encode_direction_fn=encode_direction_fn,
-            m_thres_cand=m_thres_cand
+            m_thres_cand=m_thres_cand,
+            joint=joint
         )
         for batch in batches
     ]

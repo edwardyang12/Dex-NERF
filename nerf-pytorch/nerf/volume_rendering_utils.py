@@ -160,7 +160,9 @@ def volume_render_radiance_field_ir_env(
     white_background=False,
     m_thres_cand=None,
     color_channel=3,
-    idx=None
+    idx=None,
+    d_n=None,
+    joint=False
 ):
     # TESTED
     #print(depth_values[0,:])
@@ -185,6 +187,8 @@ def volume_render_radiance_field_ir_env(
     normal_map = None
     albedo_map = None
     roughness_map = None
+    normals_diff_map = None
+    d_n_map = None
     env_rgb = torch.sigmoid(rgb)
     #print(combined_rgb.shape, env_rgb.shape,radiance_field.shape,radiance_field_env.shape)
     #assert 1==0
@@ -240,14 +244,43 @@ def volume_render_radiance_field_ir_env(
         #rgb_ir = radiance_field_env[..., :color_channel]
 
         normal = radiance_field_env[...,:3] # bs x 64 x 3
+        
+        
+        
         albedo = radiance_field_env[...,3][...,None]
         roughness = radiance_field_env[...,4][...,None]
 
-        normal_map = torch.sum(weights[..., None].detach() * normal, -2) # bs x 3
-        albedo_map = torch.sum(weights[..., None].detach() * albedo, -2)  # bs x 1
-        roughness_map = torch.sum(weights[..., None].detach() * roughness, -2)  # bs x 1
+        if joint == True:
+            normal_map = torch.sum(weights[..., None] * normal, -2) # bs x 3
+            albedo_map = torch.sum(weights[..., None] * albedo, -2)  # bs x 1
+            roughness_map = torch.sum(weights[..., None] * roughness, -2)  # bs x 1
+        else:
+            normal_map = torch.sum(weights[..., None].detach() * normal, -2) # bs x 3
+            albedo_map = torch.sum(weights[..., None].detach() * albedo, -2)  # bs x 1
+            roughness_map = torch.sum(weights[..., None].detach() * roughness, -2)  # bs x 1
 
         normal_map = F.normalize(normal_map, p=2, dim=-1)
+
+        if d_n is not None:
+            """
+            if joint == True:
+                d_n = d_n.reshape([*normal.shape[:2],3])
+                normal_diff = torch.sum(torch.pow(normal - d_n, 2), dim=-1, keepdim=True)
+                normals_diff_map = torch.sum(weights[..., None] * normal_diff, -2)
+                d_n_map = torch.sum(weights[..., None] * d_n, -2) # bs x 3
+                #print(d_n.shape, normal.shape, normal_map.shape, d_n_map.shape)
+                #assert 1==0
+            else:
+            """
+            d_n = d_n.reshape([*normal.shape[:2],3]).detach()
+            normal_diff = torch.sum(torch.pow(normal - d_n, 2), dim=-1, keepdim=True)
+            normals_diff_map = torch.sum(weights[..., None].detach() * normal_diff, -2)
+            d_n_map = torch.sum(weights[..., None].detach() * d_n, -2) # bs x 3
+
+            #normals_diff_map = torch.sum(torch.pow(normal_map - d_n_map, 2), dim=-1, keepdim=True)
+        #print(normals_diff_map.shape)
+        #assert 1==0
+
         #print(normal_map)
         #albedo_map = albedo_map.clamp(0., 1.)
         #roughness_map = roughness_map.clamp(0., 1.)
@@ -300,21 +333,31 @@ def volume_render_radiance_field_ir_env(
         #print(relight.shape)
         #assert 1==0
 
-        combined_rgb = torch.sigmoid(rgb.detach())# + torch.sigmoid(rgb_ir)
-        #combined_rgb = torch.clip(combined_rgb,0.,1.)
+        #if joint == True:
+        #    combined_rgb = torch.sigmoid(rgb)# + torch.sigmoid(rgb_ir)
+            #combined_rgb = torch.clip(combined_rgb,0.,1.)
 
-        rgb_map = (weights[..., None].detach()) * combined_rgb 
+        #    rgb_map = (weights[..., None]) * combined_rgb 
+        #else:
+
+        #    combined_rgb = torch.sigmoid(rgb.detach())# + torch.sigmoid(rgb_ir)
+            #combined_rgb = torch.clip(combined_rgb,0.,1.)
+
+        #    rgb_map = (weights[..., None].detach()) * combined_rgb 
         
         #print(weights.shape)
         #assert 1==0
         #print(torch.max(albedo_map), torch.max(roughness_map))
-        rgb_map = rgb_map.sum(dim=-2) + rgb_ir
+        #if joint == True:
+        #    rgb_map = env_rgb_map + rgb_ir
+        #else:
+        rgb_map = env_rgb_map.detach() + rgb_ir
         rgb_map = torch.clip(rgb_map,0.,1.)
         #print(rgb_map.shape)
         #assert 1==0
 
     out = [rgb_map, env_rgb_map, disp_map, acc_map, weights, depth_map, sigma_a, normal_map, 
-            albedo_map, roughness_map] + depth_map_dex
+            albedo_map, roughness_map, normals_diff_map, d_n_map] + depth_map_dex
     return tuple(out)
 
 def volume_render_reflectance_field(

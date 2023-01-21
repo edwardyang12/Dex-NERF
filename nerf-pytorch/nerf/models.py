@@ -236,12 +236,14 @@ class FlexibleNeRFModel(torch.nn.Module):
 
         self.relu = torch.nn.functional.relu
 
-    def forward(self, x):
+    def forward(self, xin):
         if self.use_viewdirs:
-            xyz, view = x[..., : self.dim_xyz], x[..., self.dim_xyz :]
+            xyz, view = xin[..., : self.dim_xyz], xin[..., self.dim_xyz :]
         else:
-            xyz = x[..., : self.dim_xyz]
+            xyz = xin[..., : self.dim_xyz]
+        
         x = self.layer1(xyz)
+        
         for i in range(len(self.layers_xyz)):
             if (
                 i % self.skip_connect_every == 0
@@ -252,6 +254,7 @@ class FlexibleNeRFModel(torch.nn.Module):
                 x = torch.cat((x, xyz), dim=-1)
             #print(x.shape, len(self.layers_xyz), self.layers_xyz[i], i, self.num_layers - 1)
             x = self.relu(self.layers_xyz[i](x))
+        
         if self.use_viewdirs:
             feat = self.relu(self.fc_feat(x))
             alpha = self.fc_alpha(x)
@@ -259,7 +262,58 @@ class FlexibleNeRFModel(torch.nn.Module):
             for l in self.layers_dir:
                 x = self.relu(l(x))
             rgb = self.fc_rgb(x)
+
             return torch.cat((rgb, alpha), dim=-1)
+            
+        else:
+            return self.fc_out(x)
+
+    def forwardf(self, xin):
+
+        if self.use_viewdirs:
+            xyz, view = xin[..., : self.dim_xyz], xin[..., self.dim_xyz :]
+        else:
+            xyz = xin[..., : self.dim_xyz]
+
+        x1 = self.layer1(xyz)
+        print(x1.requires_grad)
+        print(x1.shape)
+        x_t = x1.clone()
+        
+        for i in range(len(self.layers_xyz)):
+            if (
+                i % self.skip_connect_every == 0
+                and i > 0
+                and i != self.num_layers - 1
+            ):
+                #print("enter")
+                x_t = torch.cat((x_t, xyz), dim=-1)
+            #print(x.shape, len(self.layers_xyz), self.layers_xyz[i], i, self.num_layers - 1)
+            x_t = self.relu(self.layers_xyz[i](x_t))
+        x_test = x_t
+        if self.use_viewdirs:
+            feat = self.relu(self.fc_feat(x_test))
+            alpha = self.fc_alpha(x_test)
+            x_v = torch.cat((feat, view), dim=-1)
+            for l in self.layers_dir:
+                x_v = self.relu(l(x_v))
+            rgb = self.fc_rgb(x_v)
+
+            d_output = torch.ones_like(alpha, requires_grad=False, device=alpha.device)
+            gradients = torch.autograd.grad(
+                                            outputs=alpha,
+                                            inputs=xin,
+                                            grad_outputs=d_output,
+                                            create_graph=True,
+                                            retain_graph=True,
+                                            only_inputs=True,
+                                            #allow_unused=True
+                                            )[0]
+            print(gradients.shape)
+            assert 1==0
+
+            return torch.cat((rgb, alpha), dim=-1)
+            
         else:
             return self.fc_out(x)
 
