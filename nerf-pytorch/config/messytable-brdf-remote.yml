@@ -18,7 +18,7 @@ experiment:
   print_every: 1000
 
   normal_gt_rate: 0
-  normal_derived_rate: 0.1
+  normal_derived_rate: 0.01
   albedo_rate: 0.1
   roughness_rate: 0.1
 
