@@ -372,6 +372,8 @@ def main():
             normal_fine = nerf_out[10]
             normals_diff_map = nerf_out[13]
             d_n_map = nerf_out[14]
+            albedo_cost_map = nerf_out[15]
+            roughness_cost_map = nerf_out[16]
 
             #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
             #rgb_fine = torch.mean(rgb_fine, dim=-1)
@@ -448,6 +450,8 @@ def main():
         #coarse_loss = torch.nn.functional.mse_loss(
         #        rgb_coarse, target_ray_values
         #)
+
+        
         coarse_loss_off = torch.nn.functional.mse_loss(
             rgb_off_coarse, target_ray_values_off
         )
@@ -466,23 +470,30 @@ def main():
         #print(d_n_map.shape, (target_n*(-1.)).shape)
         #assert 1==0
         fine_normal_loss = normals_diff_map.mean()
+
+        albedo_smoothness_loss = torch.mean(albedo_cost_map)
+        roughness_smoothness_loss = torch.mean(roughness_cost_map)
         #print(fine_normal_loss)
 
-        if i < 10000:
-            fine_normal_loss = fine_normal_loss*0.
+        #if i < 10000:
+        #    fine_normal_loss = fine_normal_loss*0.
 
         loss_off = coarse_loss_off + fine_loss_off
         #print(fine_loss.item(), fine_normal_loss.item())
-        loss = fine_loss + 0.1*fine_normal_loss
-        loss_t = loss + loss_off
+        loss_on = fine_loss + \
+               cfg.experiment.normal_gt_rate * fine_normal_loss_gt + \
+               cfg.experiment.normal_derived_rate * fine_normal_loss + \
+               cfg.experiment.albedo_rate * albedo_smoothness_loss + \
+               cfg.experiment.roughness_rate * roughness_smoothness_loss
+        loss = loss_on + loss_off
 
         optimizer.zero_grad()
 
         optimizer_env.zero_grad()
         #loss.backward()
         #loss_off.backward()
-        loss_t.backward()
-        psnr = mse2psnr(loss.item())
+        loss.backward()
+        psnr = mse2psnr(fine_loss.item())
         #if no_ir_train == True or jointtrain == True:
         optimizer.step()
         #if no_ir_train == False:
@@ -623,7 +634,7 @@ def main():
                     depth_fine_nerf = nerf_out[8]
                     normal_fine, albedo_fine, roughness_fine = nerf_out[10], nerf_out[11], nerf_out[12]
                     #normals_diff_map = nerf_out[13]
-                    depth_fine_dex = list(nerf_out[15:])
+                    depth_fine_dex = list(nerf_out[17:])
                     target_ray_values = img_target.unsqueeze(-1)
                     #print(rgb_coarse.shape,rgb_fine.shape, target_ray_values.shape)
                     #rgb_coarse = torch.mean(rgb_coarse, dim=-1)

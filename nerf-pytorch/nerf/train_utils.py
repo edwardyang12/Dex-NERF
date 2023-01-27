@@ -164,10 +164,11 @@ def run_network_ir(network_fn, pts, ray_batch, chunksize, embed_fn, embeddirs_fn
 
     return radiance_field
 
-def run_network_ir_env(network_fn, pts, c_pts, ray_batch, c_ray_batch, chunksize, embed_fn, embeddirs_fn):
+#def run_network_ir_env(network_fn, pts, c_pts, ray_batch, c_ray_batch, chunksize, embed_fn, embeddirs_fn):
+def run_network_ir_env(network_fn, pts, chunksize, embed_fn):
     
     pts_flat = pts.reshape((-1, pts.shape[-1]))
-    c_pts_flat = c_pts.reshape((-1, c_pts.shape[-1]))
+    #c_pts_flat = c_pts.reshape((-1, c_pts.shape[-1]))
     embedded = embed_fn(pts_flat)
     #print(embedded.shape)
     #assert 1==0
@@ -433,6 +434,7 @@ def predict_and_render_radiance_ir(
     coarse_out = volume_render_radiance_field_ir_env(
         radiance_field,
         radiance_field_env,
+        None,
         z_vals,
         rd,
         c_rd,
@@ -450,7 +452,7 @@ def predict_and_render_radiance_ir(
     #assert 1==0
     #rgb_coarse_env, disp_coarse_env, acc_coarse_env, weights_env, depth_coarse_env = \
     #    coarse_out_env[0], coarse_out_env[1], coarse_out_env[2], coarse_out_env[3], coarse_out_env[4]
-    depth_coarse_dex = list(coarse_out[7:])
+    #depth_coarse_dex = list(coarse_out[7:])
     #depth_coarse_dex_env = list(coarse_out_env[6:])
 
     #print(torch.min(rgb_coarse), torch.max(rgb_coarse))
@@ -519,7 +521,7 @@ def predict_and_render_radiance_ir(
             derived_normals = -F.normalize(gradients, p=2, dim=-1, eps=1e-6)
             derived_normals = derived_normals.view(-1, 3)
         
-
+        '''
         radiance_field_env = run_network_ir_env(
             model_env_fine,
             pts_fine,
@@ -529,6 +531,20 @@ def predict_and_render_radiance_ir(
             getattr(options.nerf, mode).chunksize,
             encode_position_fn,
             encode_direction_fn,
+        )
+        '''
+        pts_fine_jitter = pts_fine + torch.randn_like(pts_fine) * 0.01
+        radiance_field_env = run_network_ir_env(
+            model_env_fine,
+            pts_fine,
+            getattr(options.nerf, mode).chunksize,
+            encode_position_fn
+        )
+        radiance_field_env_jitter = run_network_ir_env(
+            model_env_fine,
+            pts_fine_jitter,
+            getattr(options.nerf, mode).chunksize,
+            encode_position_fn
         )
 
         #radiance_fuse = model_fuse(torch.cat((radiance_field[...,:1],radiance_field_env),dim=-1))
@@ -548,6 +564,7 @@ def predict_and_render_radiance_ir(
         fine_out = volume_render_radiance_field_ir_env(
             radiance_field,
             radiance_field_env,
+            radiance_field_env_jitter,
             z_vals,
             rd,
             c_rd,
@@ -566,11 +583,12 @@ def predict_and_render_radiance_ir(
         depth_fine_nerf = fine_out[5]
         alpha_fine = fine_out[6]
         normals_diff_map, d_n_map = fine_out[10], fine_out[11]
+        albedo_cost_map, roughness_cost_map = fine_out[12], fine_out[13]
 
         #rgb_fine_env, disp_fine_env, acc_fine_env, depth_fine_env = \
         #fine_out_env[0], fine_out_env[1], fine_out_env[2], fine_out_env[4]
         #print(alpha_fine[500,:])
-        depth_fine_dex = list(fine_out[12:])
+        depth_fine_dex = list(fine_out[14:])
         #rgb_fine_final = torch.clip(rgb_fine + rgb_fine_env,0.,1.)
         #print(depth_fine_nerf.shape, alpha_fine.shape, rgb_coarse.shape)
     #print(acc_fine.shape)
@@ -578,7 +596,8 @@ def predict_and_render_radiance_ir(
     #assert 1==0
     out = [rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, \
         rgb_fine, rgb_off_fine, disp_fine, acc_fine, depth_fine_nerf, \
-        alpha_fine, normal_fine, albedo_fine, roughness_fine, normals_diff_map, d_n_map] + depth_fine_dex
+        alpha_fine, normal_fine, albedo_fine, roughness_fine, normals_diff_map, 
+        d_n_map, albedo_cost_map, roughness_cost_map] + depth_fine_dex
     return tuple(out)
 
 def predict_and_render_reflectance_ir(
@@ -881,6 +900,8 @@ def run_one_iter_of_nerf_ir(
         restore_shapes += [torch.Size([270,480])]
         restore_shapes += [torch.Size([270,480])]
         restore_shapes += [torch.Size([270,480,3])]
+        restore_shapes += [torch.Size([270,480])]
+        restore_shapes += [torch.Size([270,480])]
         for i in m_thres_cand:
             restore_shapes += [ray_directions.shape[:-1]]
     #print(len(restore_shapes), ray_directions.shape[:-1])

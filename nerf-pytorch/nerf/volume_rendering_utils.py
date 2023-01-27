@@ -152,6 +152,7 @@ def volume_render_radiance_field_ir(
 def volume_render_radiance_field_ir_env(
     radiance_field,
     radiance_field_env,
+    radiance_field_env_jitter,
     depth_values,
     ray_directions,
     c_ray_directions,
@@ -189,6 +190,8 @@ def volume_render_radiance_field_ir_env(
     roughness_map = None
     normals_diff_map = None
     d_n_map = None
+    albedo_smoothness_cost_map = None
+    roughness_smoothness_cost_map = None
     env_rgb = torch.sigmoid(rgb)
     #print(combined_rgb.shape, env_rgb.shape,radiance_field.shape,radiance_field_env.shape)
     #assert 1==0
@@ -244,11 +247,24 @@ def volume_render_radiance_field_ir_env(
         #rgb_ir = radiance_field_env[..., :color_channel]
 
         normal = radiance_field_env[...,:3] # bs x 64 x 3
-        
+        #print(torch.sum(normal[0,0,:]*normal[0,0,:]))
+        #assert 1==0
         
         
         albedo = radiance_field_env[...,3][...,None]
-        roughness = radiance_field_env[...,4][...,None]
+        roughness = radiance_field_env[...,4][...,None] * 0.9 + 0.09
+
+        albedo_jitter = radiance_field_env_jitter[...,3][...,None]
+        roughness_jitter = radiance_field_env_jitter[...,4][...,None] * 0.9 + 0.09
+
+        base_albedo = torch.maximum(albedo, albedo_jitter).clip(min=1e-6)
+        difference_albedo = torch.sum(((albedo - albedo_jitter)/ base_albedo)**2, dim=-1, keepdim=True) # 1024, 128, 1
+
+        base_roughness = torch.maximum(roughness, roughness_jitter).clip(min=1e-6)
+        difference_roughness = torch.sum(((roughness - roughness_jitter)/ base_roughness)**2, dim=-1, keepdim=True)
+
+        #print(difference_albedo.shape, difference_roughness.shape)
+
 
         if joint == True:
             normal_map = torch.sum(weights[..., None] * normal, -2) # bs x 3
@@ -273,12 +289,23 @@ def volume_render_radiance_field_ir_env(
             else:
             """
             d_n = d_n.reshape([*normal.shape[:2],3]).detach()
+            #view_direction = ray_directions[:,None,:].expand(-1,normal.shape[1],-1)
+
+            #normal_direction_diff = torch.sum(view_direction * normal, dim=-1, keepdim=True)
             normal_diff = torch.sum(torch.pow(normal - d_n, 2), dim=-1, keepdim=True)
             normals_diff_map = torch.sum(weights[..., None].detach() * normal_diff, -2)
             d_n_map = torch.sum(weights[..., None].detach() * d_n, -2) # bs x 3
 
             #normals_diff_map = torch.sum(torch.pow(normal_map - d_n_map, 2), dim=-1, keepdim=True)
         #print(normals_diff_map.shape)
+        #assert 1==0
+        albedo_smoothness_cost_map = torch.sum(weights[..., None].detach() * difference_albedo, -2)  # [..., 1]
+        roughness_smoothness_cost_map = torch.sum(weights[..., None].detach() * difference_roughness, -2)  # [..., 1]
+
+        #albedo_smoothness_loss = torch.mean(albedo_smoothness_cost_map)
+        #print(albedo_smoothness_loss)
+        #assert 1==0
+        #print(albedo_smoothness_cost_map.shape, normals_diff_map.shape)
         #assert 1==0
 
         #print(normal_map)
@@ -357,7 +384,8 @@ def volume_render_radiance_field_ir_env(
         #assert 1==0
 
     out = [rgb_map, env_rgb_map, disp_map, acc_map, weights, depth_map, sigma_a, normal_map, 
-            albedo_map, roughness_map, normals_diff_map, d_n_map] + depth_map_dex
+            albedo_map, roughness_map, normals_diff_map, d_n_map, 
+            albedo_smoothness_cost_map, roughness_smoothness_cost_map] + depth_map_dex
     return tuple(out)
 
 def volume_render_reflectance_field(

@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 
 class VeryTinyNeRFModel(torch.nn.Module):
@@ -562,6 +563,7 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
         out = self.fc_out(x)
         normal, brdf = out[...,:3], out[...,3:]
         normal = self.act_normal(normal)
+        normal = F.normalize(normal, p=2, dim=-1)
         brdf = self.act_brdf(brdf)
         #print(brdf.shape)
         output = torch.cat((normal,brdf), dim=-1)
