@@ -31,7 +31,7 @@ dataset:
   is_real_rgb: False
   # Optionally, provide a path to the pre-cached dataset dir. This
   # overrides the other dataset options.
-  cachedir: /edward-slow-vol/rendering/data
+  cachedir: /edward-slow-vol/rendering/data/cache
   # For the Blender datasets (synthetic), optionally return images
   # at half the original resolution of 800 x 800, to save space.
   imgname: 0128_irL_kuafu_half.png

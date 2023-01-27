@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: jianyu-nerf-brdf # Replace with something like "${USER_NAME}-{EXP_NAME}"
+  name: jianyu-nerf-brdf-cb # Replace with something like "${USER_NAME}-{EXP_NAME}"
   namespace: ucsd-haosulab
 spec:
   ttlSecondsAfterFinished: 86400  # Wait one day to delete completed jobs
@@ -49,6 +49,8 @@ spec:
               mountPath: /dev/shm
             - name: jianyu-fast-vol
               mountPath: /jianyu-fast-vol
+            - name: edward-slow-vol
+              mountPath: /edward-slow-vol
               
       volumes:
         - name: cephfs
@@ -81,6 +83,9 @@ spec:
         - name: jianyu-fast-vol
           persistentVolumeClaim:
             claimName: jianyu-fast-vol
+        - name: edward-slow-vol
+          persistentVolumeClaim:
+            claimName: edward-slow-vol
         - name: dshm
           emptyDir:
             medium: Memory

@@ -485,7 +485,7 @@ def main():
                cfg.experiment.normal_derived_rate * fine_normal_loss + \
                cfg.experiment.albedo_rate * albedo_smoothness_loss + \
                cfg.experiment.roughness_rate * roughness_smoothness_loss
-        loss = loss_on + loss_off
+        loss = cfg.experiment.ir_on_rate * loss_on + cfg.experiment.ir_off_rate * loss_off
 
         optimizer.zero_grad()
 

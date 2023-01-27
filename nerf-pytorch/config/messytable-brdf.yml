@@ -21,6 +21,9 @@ experiment:
   normal_derived_rate: 0.01
   albedo_rate: 0.1
   roughness_rate: 0.1
+  ir_on_rate: 0.1
+  ir_off_rate: 1
+
 
 # Dataset parameters.
 dataset:
