@@ -3,7 +3,7 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: ../logs_sim_brdf_test4
+  logdir: ../logs_sim_brdf_test5
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.

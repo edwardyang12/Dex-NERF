@@ -651,7 +651,7 @@ def main():
                 else:
                     loss = coarse_loss
                 
-                loss = coarse_loss + fine_loss
+                #loss = coarse_loss + fine_loss
                 
                 psnr = mse2psnr(loss.item())
                 writer.add_scalar("validation/loss", loss.item(), i)
@@ -810,6 +810,29 @@ def main():
                     + " Best Thres: "
                     + str(min_cand)
                 )
+                with open(os.path.join(logdir, "output_result.yml"), "a") as f:
+                    f.write("iter: "
+                    + str(i)
+                    + " Validation loss: "
+                    + str(loss.item())
+                    + " Validation PSNR: "
+                    + str(psnr)
+                    + " Time: "
+                    + str(time.time() - start)
+                    + " Dex Abs Err: "
+                    + str(min_abs_err)
+                    + " Dex Err4: "
+                    + str(min_err['depth_err4'])
+                    + " Nerf Abs Err: "
+                    + str(nerf_err['depth_abs_err'])
+                    + " Nerf Err4: "
+                    + str(nerf_err['depth_err4'])
+                    + " Dex Obj Err: "
+                    + str(total_obj_depth_err_dex)
+                    + " Nerf Obj Err: "
+                    + str(total_obj_depth_err_nerf)
+                    + "\n"
+                    )
 
         if i % cfg.experiment.save_every == 0 or i == cfg.experiment.train_iters - 1:
             checkpoint_dict = {
