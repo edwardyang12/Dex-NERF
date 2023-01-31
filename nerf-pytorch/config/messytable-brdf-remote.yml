@@ -3,7 +3,7 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: /jianyu-fast-vol/nerf-obj/logs_sim_brdf_graychecker_gt
+  logdir: /jianyu-fast-vol/nerf-obj/logs_sim_brdf_graychecker_1
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
@@ -17,11 +17,11 @@ experiment:
   # Number of training iterations after which to print progress.
   print_every: 1000
 
-  normal_gt_rate: 1
-  normal_derived_rate: 0
+  normal_gt_rate: 0
+  normal_derived_rate: 0.1
   albedo_rate: 0.1
   roughness_rate: 0.1
-  ir_on_rate: 1
+  ir_on_rate: 0.5
   ir_off_rate: 1
 
 # Dataset parameters.
