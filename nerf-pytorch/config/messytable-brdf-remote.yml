@@ -3,7 +3,7 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: /jianyu-fast-vol/nerf-obj/logs_sim_brdf_graychecker_4
+  logdir: /jianyu-fast-vol/nerf-obj/logs_sim_brdf_lightchecker_1
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
@@ -29,7 +29,7 @@ dataset:
   # Type of dataset (Blender vs LLFF vs DeepVoxels vs something else)
   type: blender
   # Base directory of dataset.
-  basedir: /edward-slow-vol/rendering/data/binary_checkerboard
+  basedir: /edward-slow-vol/rendering/data/light_checkerboard
   is_real_rgb: False
   # Optionally, provide a path to the pre-cached dataset dir. This
   # overrides the other dataset options.
