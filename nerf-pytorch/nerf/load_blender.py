@@ -70,8 +70,8 @@ def load_blender_data(basedir, half_res=False, testskip=1, debug=False):
         counts.append(counts[-1] + imgs.shape[0])
         all_imgs.append(imgs)
         all_poses.append(poses)
-    
-    
+
+
     i_split = [np.arange(counts[i], counts[i + 1]) for i in range(len(splits))]
     #print(i_split)
     #assert 1==0
