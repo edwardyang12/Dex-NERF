@@ -8,52 +8,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-
-# # bug remained
-# def GGX_specular(
-#         normal,
-#         pts2c,
-#         pts2l,
-#         roughness,
-#         fresnel
-# ):
-#     L = F.normalize(pts2l, dim=-1)  # [nrays, nlights, 3]
-#     V = F.normalize(pts2c, dim=-1)  # [nrays, 3]
-#     H = F.normalize((L + V[:, None, :]) / 2.0, dim=-1)  # [nrays, nlights, 3]
-#     N = F.normalize(normal, dim=-1)  # [nrays, 3]
-
-#     NoV = torch.sum(V * N, dim=-1, keepdim=True)  # [nrays, 1]
-#     N = N * NoV.sign()  # [nrays, 3]
-
-#     NoL = torch.sum(N[:, None, :] * L, dim=-1, keepdim=True).clamp_(1e-6, 1)  # [nrays, nlights, 1]
-#     NoV = torch.sum(N * V, dim=-1, keepdim=True).clamp_(1e-6, 1)  # [nrays, 1]
-#     NoH = torch.sum(N[:, None, :] * H, dim=-1, keepdim=True).clamp_(1e-6, 1)  # [nrays, nlights, 1]
-#     VoH = torch.sum(V[:, None, :] * H, dim=-1, keepdim=True).clamp_(1e-6, 1)  # [nrays, nlights, 1]
-
-#     alpha = roughness * roughness  # [nrays, 3]
-#     alpha2 = alpha * alpha  # [nrays, 3]
-#     f = NoH * NoH * (alpha2[:, None, :] - 1) + 1.0  # [nrays, nlights, 1]
-#     D = alpha2[:, None, :] / (np.pi * f * f)  # [nrays, nlights, 1]
-
-#     F0 = fresnel[:, None, :] + (1 - fresnel[:, None, :]) * torch.pow(1 - VoH, 5)  # [nrays, nlights, 3]
-
-#     V = V_SmithGGXCorrelated(NoV[:, None, :], NoL, alpha[:, None, :])  # [nrays, nlights, 1]
-
-#     specular = F0 * D * V  # [nrays, nlights, 3]
-
-#     return specular
-
-# def V_SmithGGXCorrelated(NoV, NoL, alpha):
-#     alpha2 = alpha * alpha
-#     GGXL = NoV * torch.sqrt((NoL * NoL * (1 - alpha2) + alpha2).clamp_(1e-12, 1))
-#     GGXV = NoL * torch.sqrt((NoV * NoV * (1 - alpha2) + alpha2).clamp_(1e-12, 1))
-    
-#     V = 0.5 / (GGXL + GGXV)
-#     return V
-
-
-
-
 def specular_pipeline_render_multilight_new(
         normal,
         pts2c,
