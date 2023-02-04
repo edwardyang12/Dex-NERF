@@ -24,6 +24,13 @@ def get_minibatches(inputs: torch.Tensor, chunksize: Optional[int] = 1024 * 8):
     """
     return [inputs[i : i + chunksize] for i in range(0, inputs.shape[0], chunksize)]
 
+def get_minibatches_ts(inputs: torch.Tensor, chunksize: Optional[int] = 1024 * 8):
+    r"""Takes a huge tensor (ray "bundle") and splits it into a list of minibatches.
+    Each element of the list (except possibly the last) has dimension `0` of length
+    `chunksize`.
+    """
+    return [inputs[i : i + chunksize] for i in range(0, inputs.shape[0], chunksize)]
+
 
 def meshgrid_xy(
     tensor1: torch.Tensor, tensor2: torch.Tensor
@@ -107,9 +114,11 @@ def get_ray_bundle(
         directions[..., None, :] * torch.inverse(tform_cam2world[:3, :3]), dim=-1
     )
     ray_origins = torch.inverse(tform_cam2world)[:3, -1].expand(ray_directions.shape)
+    origins = torch.zeros(ray_origins.shape)
+    #print(ray_origins.shape, ray_directions.shape, origins.shape, directions.shape)
     #print(ray_origins[0,0,:])
     #assert 1==0
-    return ray_origins, ray_directions
+    return ray_origins, ray_directions, origins, directions
 
 
 def positional_encoding(
