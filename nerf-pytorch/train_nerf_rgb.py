@@ -14,6 +14,7 @@ from PIL import Image
 
 from nerf import compute_err_metric, depth_error_img, compute_obj_err
 
+
 from nerf import (CfgNode, get_embedding_function, get_ray_bundle, img2mse,
                   load_blender_data, load_llff_data, meshgrid_xy, models,
                   mse2psnr, run_one_iter_of_nerf, load_messytable_data)
@@ -162,6 +163,7 @@ def main():
     
     m_thres_max = cfg.nerf.validation.m_thres
     m_thres_cand = np.arange(5,m_thres_max+5,5)
+
     os.makedirs(os.path.join(logdir,"pred_depth_dex"), exist_ok=True)
     os.makedirs(os.path.join(logdir,"pred_depth_nerf"), exist_ok=True)
 
@@ -258,7 +260,7 @@ def main():
             #print(ray_directions.shape)
             # batch_rays = torch.stack([ray_origins, ray_directions], dim=0)
             #print(img_target.shape)
-            
+
             target_s = img_target[select_inds[:, 0], select_inds[:, 1]]
             target_d = depth_target[select_inds[:, 0], select_inds[:, 1]]
             
@@ -291,11 +293,11 @@ def main():
             #print(rgb_coarse.shape, rgb_fine.shape)
             target_ray_values = target_s
             #assert 1==0
-        
+
         coarse_loss = torch.nn.functional.mse_loss(
             rgb_coarse[..., :3], target_ray_values[..., :3]
         )
-       
+
         fine_loss = None
         if rgb_fine is not None:
             fine_loss = torch.nn.functional.mse_loss(
@@ -307,7 +309,6 @@ def main():
             #depth_loss = img2mse(depth_fine_dex[0], depth_target)
             #print(depth_fine_dex[0].shape, depth_loss)
             assert 1==0
-            
         # loss = torch.nn.functional.mse_loss(rgb_pred[..., :3], target_s[..., :3])
         loss = 0.0
         # if fine_loss is not None:
@@ -427,7 +428,7 @@ def main():
                 psnr = mse2psnr(loss.item())
                 writer.add_scalar("validation/loss", loss.item(), i)
                 writer.add_scalar("validation/coarse_loss", coarse_loss.item(), i)
-                writer.add_scalar("validataion/psnr", psnr, i)
+                writer.add_scalar("validation/psnr", psnr, i)
                 writer.add_image(
                     "validation/rgb_coarse", cast_to_image(rgb_coarse[..., :3]), i
                 )
@@ -509,7 +510,6 @@ def main():
                         pred_depth_err_np.transpose((2,0,1)),
                         i,
                     )
-
 
                     #print(depth_fine_dex[cand].shape)
                 writer.add_image(

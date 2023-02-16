@@ -121,6 +121,68 @@ def depth_error_img(D_est_tensor, D_gt_tensor, mask, abs_thres=1., dilate_radius
         error_image[:, :10, i * distance:(i + 1) * distance, :] = cols[i, 2:]
     return error_image[0] # [H, W, 3]
 
+def compute_err_metric(depth_gt, depth_pred, mask):
+    """
+    Compute the error metrics for predicted disparity map
+    :param disp_gt: GT disparity map, [bs, 1, H, W]
+    :param depth_gt: GT depth map, [bs, 1, H, W]
+    :param disp_pred: Predicted disparity map, [bs, 1, H, W]
+    :param focal_length: Focal length, [bs, 1]
+    :param baseline: Baseline of the camera, [bs, 1]
+    :param mask: Selected pixel
+    :return: Error metrics
+    """
+    depth_abs_err = F.l1_loss(depth_pred[mask] * 1000, depth_gt[mask] * 1000, reduction='mean').item()
+    depth_diff = torch.abs(depth_gt[mask] - depth_pred[mask])  # [bs, 1, H, W]
+    depth_err2 = depth_diff[depth_diff > 2e-3].numel() / depth_diff.numel()
+    depth_err4 = depth_diff[depth_diff > 4e-3].numel() / depth_diff.numel()
+    depth_err8 = depth_diff[depth_diff > 8e-3].numel() / depth_diff.numel()
+    err = {}
+    err['depth_abs_err'] = depth_abs_err
+    err['depth_err2'] = depth_err2
+    err['depth_err4'] = depth_err4
+    err['depth_err8'] = depth_err8
+    return err
+def gen_error_colormap_depth():
+    cols = np.array(
+        [[0, 0.00001, 0, 0, 0],
+         [0.00001, 2000./(2**10) , 49, 54, 149],
+         [2000./(2**10) , 2000./(2**9) , 69, 117, 180],
+         [2000./(2**9) , 2000./(2**8) , 116, 173, 209],
+         [2000./(2**8), 2000./(2**7), 171, 217, 233],
+         [2000./(2**7), 2000./(2**6), 224, 243, 248],
+         [2000./(2**6), 2000./(2**5), 254, 224, 144],
+         [2000./(2**5), 2000./(2**4), 253, 174, 97],
+         [2000./(2**4), 2000./(2**3), 244, 109, 67],
+         [2000./(2**3), 2000./(2**2), 215, 48, 39],
+         [2000./(2**2), np.inf, 165, 0, 38]], dtype=np.float32)
+    cols[:, 2: 5] /= 255.
+    return cols
+def depth_error_img(D_est_tensor, D_gt_tensor, mask, abs_thres=1., dilate_radius=1):
+    D_gt_np = D_gt_tensor.detach().cpu().numpy()
+    D_est_np = D_est_tensor.detach().cpu().numpy()
+    mask = mask.detach().cpu().numpy()
+    B, H, W = D_gt_np.shape
+    # valid mask
+    # mask = (D_gt_np > 0) & (D_gt_np < 1250)
+    # error in percentage. When error <= 1, the pixel is valid since <= 3px & 5%
+    error = np.abs(D_gt_np - D_est_np)
+    error[np.logical_not(mask)] = 0
+    error[mask] = error[mask] / abs_thres
+    # get colormap
+    cols = gen_error_colormap_depth()
+    # create error image
+    error_image = np.zeros([B, H, W, 3], dtype=np.float32)
+    for i in range(cols.shape[0]):
+        error_image[np.logical_and(error >= cols[i][0], error < cols[i][1])] = cols[i, 2:]
+    # TODO: imdilate
+    # error_image = cv2.imdilate(D_err, strel('disk', dilate_radius));
+    error_image[np.logical_not(mask)] = 0.
+    # show color tag in the top-left cornor of the image
+    for i in range(cols.shape[0]):
+        distance = 20
+        error_image[:, :10, i * distance:(i + 1) * distance, :] = cols[i, 2:]
+    return error_image[0] # [H, W, 3]
 
 def run_network(network_fn, pts, ray_batch, chunksize, embed_fn, embeddirs_fn):
 
@@ -253,7 +315,7 @@ def predict_and_render_radiance(
     else:
         z_vals = 1.0 / (1.0 / near * (1.0 - t_vals) + 1.0 / far * t_vals)
     z_vals = z_vals.expand([num_rays, getattr(options.nerf, mode).num_coarse])
-    
+
 
     if getattr(options.nerf, mode).perturb:
         # Get intervals between samples.
@@ -303,7 +365,7 @@ def predict_and_render_radiance(
         #print(z_samples[0,:])
 
         z_vals, _ = torch.sort(torch.cat((z_vals, z_samples), dim=-1), dim=-1)
-        
+
         #print(z_samples[0,:])
         # pts -> (N_rays, N_samples + N_importance, 3)
         pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
@@ -316,7 +378,7 @@ def predict_and_render_radiance(
             encode_position_fn,
             encode_direction_fn,
         )
-        #rgb_fine, disp_fine, acc_fine, _, _, depth_fine_dex 
+        #rgb_fine, disp_fine, acc_fine, _, _, depth_fine_dex
         fine_out = volume_render_radiance_field(
             radiance_field,
             z_vals,
@@ -788,7 +850,7 @@ def run_one_iter_of_nerf(
 ):
     viewdirs = None
     #print(ray_directions.shape, ray_origins.shape)
-    
+
     if options.nerf.use_viewdirs:
         # Provide ray directions as input
         viewdirs = ray_directions
