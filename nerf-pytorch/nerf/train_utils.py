@@ -350,7 +350,12 @@ def predict_and_render_radiance_ir(
     encode_position_fn=None,
     encode_direction_fn=None,
     m_thres_cand=None,
-    joint=False
+    joint=False,
+    albedo_edit=None,
+    roughness_edit=None,
+    normal_edit=None,
+    logdir=None,
+    light_extrinsic=None
 ):
 
     # TESTED
@@ -436,6 +441,7 @@ def predict_and_render_radiance_ir(
         radiance_field_env,
         None,
         z_vals,
+        ro,
         rd,
         c_rd,
         model_env_coarse,
@@ -445,8 +451,8 @@ def predict_and_render_radiance_ir(
         color_channel=1,
         idx=idx,
         d_n=None,
-        joint=joint
-
+        joint=joint,
+        light_extrinsic=light_extrinsic
     )
     rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, weights, depth_coarse = coarse_out[0], coarse_out[1], coarse_out[2], coarse_out[3], coarse_out[4], coarse_out[5]
     #assert 1==0
@@ -566,6 +572,7 @@ def predict_and_render_radiance_ir(
             radiance_field_env,
             radiance_field_env_jitter,
             z_vals,
+            ro,
             rd,
             c_rd,
             model_env_fine,
@@ -575,7 +582,13 @@ def predict_and_render_radiance_ir(
             color_channel=1,
             idx=idx,
             d_n=derived_normals,
-            joint=joint
+            joint=joint,
+            albedo_edit=albedo_edit,
+            roughness_edit=roughness_edit,
+            normal_edit=normal_edit,
+            mode=mode,
+            logdir=logdir,
+            light_extrinsic=light_extrinsic
         )
         #print(z_vals[0,:])
         rgb_fine, rgb_off_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2], fine_out[3]
@@ -866,7 +879,12 @@ def run_one_iter_of_nerf_ir(
     encode_direction_fn=None,
     m_thres_cand=None,
     idx=None,
-    joint=False
+    joint=False,
+    albedo_edit=None,
+    roughness_edit = None,
+    normal_edit=None,
+    logdir=None,
+    light_extrinsic=None
 ):
     viewdirs = None
     #print(ray_directions.shape, ray_origins.shape)
@@ -924,6 +942,8 @@ def run_one_iter_of_nerf_ir(
         rays = torch.cat((rays, viewdirs, cam_viewdirs), dim=-1)
 
     batches = get_minibatches(rays, chunksize=getattr(options.nerf, mode).chunksize)
+    #print(len(batches))
+    #assert 1==0
     pred = [
         predict_and_render_radiance_ir(
             batch,
@@ -937,7 +957,12 @@ def run_one_iter_of_nerf_ir(
             encode_position_fn=encode_position_fn,
             encode_direction_fn=encode_direction_fn,
             m_thres_cand=m_thres_cand,
-            joint=joint
+            joint=joint,
+            albedo_edit=albedo_edit,
+            roughness_edit=roughness_edit,
+            normal_edit=normal_edit,
+            logdir=logdir,
+            light_extrinsic=light_extrinsic
         )
         for batch in batches
     ]
@@ -948,7 +973,7 @@ def run_one_iter_of_nerf_ir(
         for image in synthesized_images
     ]
     #print(len(synthesized_images), len(restore_shapes))
-    if mode == "validation":
+    if mode == "validation" or mode == "test":
         synthesized_images = [
             image.view(shape) if image is not None else None
             for (image, shape) in zip(synthesized_images, restore_shapes)

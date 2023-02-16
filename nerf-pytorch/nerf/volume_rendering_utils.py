@@ -5,6 +5,7 @@ from .nerf_helpers import cumprod_exclusive
 from .brdf import *
 
 brdf_specular = specular_pipeline_render_multilight_new
+import os
 
 
 def volume_render_radiance_field(
@@ -154,6 +155,7 @@ def volume_render_radiance_field_ir_env(
     radiance_field_env,
     radiance_field_env_jitter,
     depth_values,
+    ray_origins,
     ray_directions,
     c_ray_directions,
     model_env,
@@ -163,7 +165,13 @@ def volume_render_radiance_field_ir_env(
     color_channel=3,
     idx=None,
     d_n=None,
-    joint=False
+    joint=False,
+    albedo_edit=None,
+    roughness_edit=None,
+    normal_edit=None,
+    mode="train",
+    logdir=None,
+    light_extrinsic=None
 ):
     # TESTED
     #print(depth_values[0,:])
@@ -196,6 +204,7 @@ def volume_render_radiance_field_ir_env(
     #print(combined_rgb.shape, env_rgb.shape,radiance_field.shape,radiance_field_env.shape)
     #assert 1==0
     noise = 0.0
+    """
     if radiance_field_noise_std > 0.0:
         noise = (
             torch.randn(
@@ -206,9 +215,11 @@ def volume_render_radiance_field_ir_env(
             * radiance_field_noise_std
         )
         # noise = noise.to(radiance_field)
+    """
     sigma_a = torch.nn.functional.relu(radiance_field[..., color_channel] + noise)
     alpha = 1.0 - torch.exp(-sigma_a * dists)
     weights = alpha * cumprod_exclusive(1.0 - alpha + 1e-10)
+    
 
 
 
@@ -243,6 +254,8 @@ def volume_render_radiance_field_ir_env(
     #print(depth_map_dex.shape)
 
     if radiance_field_env is not None:
+        #print(weights.shape, depth_values.shape)
+        #assert 1==0
         nlights = 1
         #rgb_ir = radiance_field_env[..., :color_channel]
 
@@ -265,7 +278,7 @@ def volume_render_radiance_field_ir_env(
 
         #print(difference_albedo.shape, difference_roughness.shape)
 
-
+        
         if joint == True:
             normal_map = torch.sum(weights[..., None] * normal, -2) # bs x 3
             albedo_map = torch.sum(weights[..., None] * albedo, -2)  # bs x 1
@@ -275,7 +288,17 @@ def volume_render_radiance_field_ir_env(
             albedo_map = torch.sum(weights[..., None].detach() * albedo, -2)  # bs x 1
             roughness_map = torch.sum(weights[..., None].detach() * roughness, -2)  # bs x 1
 
+        #print(albedo_map.shape)
+        #assert 1==0
         normal_map = F.normalize(normal_map, p=2, dim=-1)
+
+        if mode == "test":
+            torch.save(weights.cpu(), os.path.join(logdir, "weights.pt"))
+            torch.save(depth_values.cpu(), os.path.join(logdir, "depth_values.pt"))
+            torch.save(radiance_field[..., color_channel].cpu(), os.path.join(logdir, "occu.pt"))
+            torch.save(albedo_map.cpu(), os.path.join(logdir, "albedo_map.pt"))
+            torch.save(roughness_map.cpu(), os.path.join(logdir, "roughness_map.pt"))
+
 
         if d_n is not None:
             """
@@ -313,6 +336,14 @@ def volume_render_radiance_field_ir_env(
         #roughness_map = roughness_map.clamp(0., 1.)
         albedo_map = albedo_map.clamp(0., 1.)
         roughness_map = roughness_map.clamp(0., 1.)
+
+        if mode == "test":
+            if albedo_edit is not None:
+                albedo_map = albedo_edit
+            if roughness_edit is not None:
+                roughness_map = roughness_edit
+            if normal_edit is not None:
+                normal_map = normal_edit
         #print(torch.norm(normal_map,dim=-1))
         #print(torch.norm(normal_map,dim=-1).shape)
 
@@ -327,8 +358,21 @@ def volume_render_radiance_field_ir_env(
 
         #print(rgb.shape)
         #assert 1==0
+        rays_o = ray_origins
+        rays_d = F.normalize(ray_directions,p=2.0,dim=1)
+        surface_z = depth_map
+        surface_xyz = rays_o + (surface_z).unsqueeze(-1) * rays_d  # [bs, 3]
+
+
         surf2c = -ray_directions
-        surf2l = -ray_directions # bs x 3
+        #print(light_extrinsic)
+        #assert 1==0
+        direct_light, surf2l = model_env.get_light(surface_xyz.detach(), light_extrinsic) # bs x 3
+        direct_light = direct_light.unsqueeze(-1).unsqueeze(-1)
+        #print(direct_light.shape, surf2l.shape)
+        #assert 1==0
+
+
         surf2c = F.normalize(surf2c,p=2.0,dim=1)
         surf2l = F.normalize(surf2l,p=2.0,dim=1).unsqueeze(-2) # bs x 1 x 3
 
@@ -349,7 +393,7 @@ def volume_render_radiance_field_ir_env(
         #    print(surface_brdf.shape)
         #    assert 1==0
         #print(idx.shape, idx.dtype, idx[:10,:])
-        direct_light = model_env.get_light(idx).cuda().unsqueeze(-1).unsqueeze(-1) # [bs, 1, 1]
+        #direct_light = model_env.get_light(idx).cuda().unsqueeze(-1).unsqueeze(-1) # [bs, 1, 1]
         light_rgbs = direct_light # [bs, 1, 1]
         #print(torch.max(light_rgbs))
         #print(light_rgbs.shape)
@@ -378,7 +422,7 @@ def volume_render_radiance_field_ir_env(
         #if joint == True:
         #    rgb_map = env_rgb_map + rgb_ir
         #else:
-        rgb_map = env_rgb_map.detach() + rgb_ir
+        rgb_map = env_rgb_map + rgb_ir
         rgb_map = torch.clip(rgb_map,0.,1.)
         #print(rgb_map.shape)
         #assert 1==0

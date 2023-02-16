@@ -145,6 +145,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
 
     all_imgs = []
     all_poses = []
+    all_ir_poses = []
     all_intrinsics = []
     all_depths = []
     all_labels = []
@@ -175,6 +176,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
         labels = []
         imgs_off = []
         normals = []
+        ir_poses = []
         #print(os.listdir(path))
         idx = 0
         for prefix in os.listdir(path):
@@ -222,6 +224,8 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
             imgs.append(cur_img)
             depths.append(np.array(Image.open(gt_depth_fname))/1000)
             poses.append(np.array(meta[extri_n]))
+            ir_poses.append(np.array(meta["ir_transformation"]))
+            
             labels.append(np.array(Image.open(label_fname)))
             imgs_off.append(cur_img_off)
             normals.append(normal_img)
@@ -241,6 +245,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
             
             #print(imgs.shape)
         poses = np.array(poses).astype(np.float32)
+        ir_poses = np.array(ir_poses).astype(np.float32)
         intrinsics = np.array(intrinsics).astype(np.float32)
         imgs = (np.array(imgs) / 255.0).astype(np.float32)
         depths = np.array(depths).astype(np.float32)
@@ -253,6 +258,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
         
         all_imgs.append(imgs)
         all_poses.append(poses)
+        all_ir_poses.append(ir_poses)
         all_intrinsics.append(intrinsics)
         all_depths.append(depths)
         all_labels.append(labels)
@@ -263,6 +269,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
 
     imgs = np.concatenate(all_imgs, 0)
     poses = np.concatenate(all_poses, 0)
+    ir_poses = np.concatenate(all_ir_poses, 0)
     intrinsics = np.concatenate(all_intrinsics, 0)
     depths = np.concatenate(all_depths,0)
     labels = np.concatenate(all_labels,0)
@@ -339,13 +346,14 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
         # imgs = imgs.unsqueeze(-1).repeat(1,1,1,3)
 
     poses = torch.from_numpy(poses)
+    ir_poses = torch.from_numpy(ir_poses)
     intrinsics = torch.from_numpy(intrinsics)
     #print(i_split)
     #print(poses)
     #print(poses.shape)
     #assert 1==0
 
-    return imgs, poses, render_poses, [H, W, focal], i_split, intrinsics, depths, labels, imgs_off, normals
+    return imgs, poses, ir_poses, render_poses, [H, W, focal], i_split, intrinsics, depths, labels, imgs_off, normals
 
 
 def load_messytable_data_RF(basedir, half_res=False, testskip=1, debug=False, cfg=None, is_real_rgb = False, sceneid = 1):

@@ -53,59 +53,31 @@ def main():
     # torch.autograd.set_detect_anomaly(True)
 
     # If a pre-cached dataset is available, skip the dataloader.
-    USE_CACHED_DATASET = False
+
     train_paths, validation_paths = None, None
     images, poses, render_poses, hwf, i_split = None, None, None, None, None
     H, W, focal, i_train, i_val, i_test = None, None, None, None, None, None
-    if hasattr(cfg.dataset, "cachedir") and os.path.exists(cfg.dataset.cachedir):
-        train_paths = glob.glob(os.path.join(cfg.dataset.cachedir, "train", "*.data"))
-        validation_paths = glob.glob(
-            os.path.join(cfg.dataset.cachedir, "val", "*.data")
-        )
-        USE_CACHED_DATASET = True
-    else:
-        # Load dataset
-        images, poses, render_poses, hwf = None, None, None, None
-        if cfg.dataset.type.lower() == "blender":
-            images, poses, render_poses, hwf, i_split, intrinsics, depths, labels, imgs_off, normals = load_messytable_data(
-                cfg.dataset.basedir,
-                half_res=cfg.dataset.half_res,
-                debug = False,
-                testskip=cfg.dataset.testskip,
-                cfg=cfg,
-                is_real_rgb=cfg.dataset.is_real_rgb,
-                sceneid = configargs.sceneid
-            )
-            #print(images.shape, i_split)
-            #assert 1==0
-            i_train, i_val, i_test = i_split
-            H, W, _ = hwf
-            H, W = int(H), int(W)
-            if cfg.nerf.train.white_background:
-                images = images[..., :3] * images[..., -1:] + (1.0 - images[..., -1:])
-        elif cfg.dataset.type.lower() == "llff":
-            images, poses, bds, render_poses, i_test = load_llff_data(
-                cfg.dataset.basedir, factor=cfg.dataset.downsample_factor
-            )
-            hwf = poses[0, :3, -1]
-            poses = poses[:, :, :]
-            if not isinstance(i_test, list):
-                i_test = [i_test]
-            if cfg.dataset.llffhold > 0:
-                i_test = np.arange(images.shape[0])[:: cfg.dataset.llffhold]
-            i_val = i_test
-            i_train = np.array(
-                [
-                    i
-                    for i in np.arange(images.shape[0])
-                    if (i not in i_test and i not in i_val)
-                ]
-            )
-            H, W, focal = hwf
-            H, W = int(H), int(W)
-            hwf = [H, W, focal]
-            images = torch.from_numpy(images)
-            poses = torch.from_numpy(poses)
+
+    # Load dataset
+    images, poses, render_poses, hwf = None, None, None, None
+
+    images, poses, ir_poses, render_poses, hwf, i_split, intrinsics, depths, labels, imgs_off, normals = load_messytable_data(
+        cfg.dataset.basedir,
+        half_res=cfg.dataset.half_res,
+        debug = False,
+        testskip=cfg.dataset.testskip,
+        cfg=cfg,
+        is_real_rgb=cfg.dataset.is_real_rgb,
+        sceneid = configargs.sceneid
+    )
+    #print(images.shape, i_split)
+    #assert 1==0
+    i_train, i_val, i_test = i_split
+    H, W, _ = hwf
+    H, W = int(H), int(W)
+    if cfg.nerf.train.white_background:
+        images = images[..., :3] * images[..., -1:] + (1.0 - images[..., -1:])
+    
 
     # Seed experiment for repeatability
     seed = cfg.experiment.randomseed
@@ -145,6 +117,9 @@ def main():
         color_channel=1
     )
     model_coarse.to(device)
+    ir_intrinsic = intrinsics[0,:,:].to(device)
+    ir_intrinsic[:2,2] = ir_intrinsic[:2,2] * 2.
+    ir_extrinsic = ir_poses[0,:,:].to(device)
     model_env_coarse = getattr(models, cfg.models.env.type)(
         num_layers=cfg.models.env.num_layers,
         hidden_size=cfg.models.env.hidden_size,
@@ -156,7 +131,9 @@ def main():
         #use_viewdirs=cfg.models.env.use_viewdirs,
         color_channel=1,
         H = cfg.dataset.H,
-        W = cfg.dataset.W
+        W = cfg.dataset.W,
+        ir_intrinsic=ir_intrinsic,
+        ir_extrinsic=ir_extrinsic
     )
     model_env_coarse.to(device)
     model_env_fine = getattr(models, cfg.models.env.type)(
@@ -170,7 +147,9 @@ def main():
         #use_viewdirs=cfg.models.env.use_viewdirs,
         color_channel=1,
         H = cfg.dataset.H,
-        W = cfg.dataset.W
+        W = cfg.dataset.W,
+        ir_intrinsic=ir_intrinsic,
+        ir_extrinsic=ir_extrinsic
     )
     model_env_fine.to(device)
 
@@ -195,16 +174,18 @@ def main():
 
     # Initialize optimizer.
     trainable_parameters = list(model_coarse.parameters())
-    trainable_parameters_env = list(model_env_coarse.parameters())
-    #trainable_parameters_env += list(model_fuse.parameters())
+    #trainable_parameters_env = list(model_env_coarse.parameters())
+    trainable_parameters += list(model_env_coarse.parameters())
+
     trainable_parameters += list(model_fine.parameters())
-    trainable_parameters_env += list(model_env_fine.parameters())
+    #trainable_parameters_env += list(model_env_fine.parameters())
+    trainable_parameters += list(model_env_fine.parameters())
     optimizer = getattr(torch.optim, cfg.optimizer.type)(
         trainable_parameters, lr=cfg.optimizer.lr
     )
-    optimizer_env = getattr(torch.optim, cfg.optimizer.type)(
-        trainable_parameters_env, lr=cfg.optimizer.lr
-    )
+    #optimizer_env = getattr(torch.optim, cfg.optimizer.type)(
+    #    trainable_parameters_env, lr=cfg.optimizer.lr
+    #)
 
     
     # Setup logging.
@@ -228,8 +209,9 @@ def main():
     if os.path.exists(configargs.load_checkpoint):
         checkpoint = torch.load(configargs.load_checkpoint)
         model_coarse.load_state_dict(checkpoint["model_coarse_state_dict"])
-        if checkpoint["model_fine_state_dict"]:
-            model_fine.load_state_dict(checkpoint["model_fine_state_dict"])
+        model_fine.load_state_dict(checkpoint["model_fine_state_dict"])
+        model_env_coarse.load_state_dict(checkpoint["model_env_coarse_state_dict"])
+        model_env_fine.load_state_dict(checkpoint["model_env_fine_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         start_iter = checkpoint["iter"]
 
@@ -250,206 +232,115 @@ def main():
 
         rgb_coarse, rgb_fine = None, None
         target_ray_values = None
-        if USE_CACHED_DATASET:
-            datafile = np.random.choice(train_paths)
-            cache_dict = torch.load(datafile)
-            ray_bundle = cache_dict["ray_bundle"].to(device)
-            ray_origins, ray_directions = (
-                ray_bundle[0].reshape((-1, 3)),
-                ray_bundle[1].reshape((-1, 3)),
-            )
-            target_ray_values = cache_dict["target"][..., :3].reshape((-1, 3))
-            select_inds = np.random.choice(
-                ray_origins.shape[0],
-                size=(cfg.nerf.train.num_random_rays),
-                replace=False,
-            )
-            ray_origins, ray_directions = (
-                ray_origins[select_inds],
-                ray_directions[select_inds],
-            )
-            target_ray_values = target_ray_values[select_inds].to(device)
-            # ray_bundle = torch.stack([ray_origins, ray_directions], dim=0).to(device)
 
-            #rgb_coarse, _, _, rgb_fine, _, _,_
-            nerf_out = run_one_iter_of_nerf(
-                cache_dict["height"],
-                cache_dict["width"],
-                cache_dict["focal_length"],
-                model_coarse,
-                model_fine,
-                ray_origins,
-                ray_directions,
-                cfg,
-                mode="train",
-                encode_position_fn=encode_position_fn,
-                encode_direction_fn=encode_direction_fn,
-                m_thres_cand=m_thres_cand
-            )
-            rgb_coarse, rgb_fine = nerf_out[0], nerf_out[3]
-        else:
-            img_idx = np.random.choice(i_train)
-            img_target = images[img_idx].to(device)
-            
-            pose_target = poses[img_idx, :, :].to(device)
-            depth_target = depths[img_idx].to(device)
-            normal_target = normals[img_idx].to(device)
-            #print(normal_target.shape)
-            #assert 1==0
-            #print(img_target.shape, depth_target.shape)
-            #assert 1==0
-            #print("===========================================")
-            #print(pose_target)
+        img_idx = np.random.choice(i_train)
+        img_target = images[img_idx].to(device)
+        
+        pose_target = poses[img_idx, :, :].to(device)
+        depth_target = depths[img_idx].to(device)
+        normal_target = normals[img_idx].to(device)
+        #print(normal_target.shape)
+        #assert 1==0
+        #print(img_target.shape, depth_target.shape)
+        #assert 1==0
+        #print("===========================================")
+        #print(pose_target)
 
-            #print(pose_target.shape)
-            intrinsic_target = intrinsics[img_idx,:,:].to(device)
-            img_off_target = imgs_off[img_idx].to(device)
-            #print(intrinsic_target)
-            #print(img_idx)
-            #print("===========================================")
-            ray_origins, ray_directions, cam_origins, cam_directions = get_ray_bundle(H, W, focal, pose_target, intrinsic_target)
-            coords = torch.stack(
-                meshgrid_xy(torch.arange(H).to(device), torch.arange(W).to(device)),
-                dim=-1,
-            )
-            coords = coords.reshape((-1, 2))
-            select_inds = np.random.choice(
-                coords.shape[0], size=(cfg.nerf.train.num_random_rays), replace=False
-            )
-            select_inds = coords[select_inds]
-            #print(ray_origins.shape)
-            #assert 1==0
-            ray_origins = ray_origins[select_inds[:, 0], select_inds[:, 1], :]
-            #print(ray_directions.shape)
-            ray_directions = ray_directions[select_inds[:, 0], select_inds[:, 1], :]
-            #print(ray_directions.shape)
-            # batch_rays = torch.stack([ray_origins, ray_directions], dim=0)
-            #print(img_target.shape)
-            cam_origins = cam_origins[select_inds[:, 0], select_inds[:, 1], :]
-            #print(ray_directions.shape)
-            cam_directions = cam_directions[select_inds[:, 0], select_inds[:, 1], :]
-            
-            target_s = img_target[select_inds[:, 0], select_inds[:, 1]] # [1080]
-            #print(select_inds)
-            #assert 1==0 
-            #print(target_s.shape)
-            #assert 1==0
-            #target_env = pattern_target[select_inds[:, 0], select_inds[:, 1]]
-            target_d = depth_target[select_inds[:, 0], select_inds[:, 1]]
-            target_s_off = img_off_target[select_inds[:, 0], select_inds[:, 1]]
-            target_n = normal_target[select_inds[:, 0], select_inds[:, 1], :]
-            
+        #print(pose_target.shape)
+        intrinsic_target = intrinsics[img_idx,:,:].to(device)
+        ir_extrinsic_target = ir_poses[img_idx,:,:].to(device)
 
-            #print(target_s.shape)
-            #assert 1==0
-            then = time.time()
-            #print(ray_origins.shape, ray_directions.shape)
-            #print(ray_origins[-3:,:], ray_directions[-3:,:])
-            #rgb_coarse, _, _, rgb_fine, _, _, _
-            nerf_out = run_one_iter_of_nerf_ir(
-                H,
-                W,
-                intrinsic_target[0,0],
-                model_coarse,
-                model_fine,
-                model_env_coarse,
-                model_env_fine,
-                #model_fuse,
-                ray_origins,
-                ray_directions,
-                cam_origins.cuda(),
-                cam_directions.cuda(),
-                cfg,
-                mode="train",
-                encode_position_fn=encode_position_fn,
-                encode_direction_fn=encode_direction_fn,
-                m_thres_cand=m_thres_cand,
-                idx=select_inds,
-                joint=is_joint
-            )
-            rgb_coarse, rgb_off_coarse, rgb_fine, rgb_off_fine = nerf_out[0], nerf_out[1], nerf_out[4], nerf_out[5]
-            alpha_fine = nerf_out[9]
-            normal_fine = nerf_out[10]
-            normals_diff_map = nerf_out[13]
-            d_n_map = nerf_out[14]
-            albedo_cost_map = nerf_out[15]
-            roughness_cost_map = nerf_out[16]
+        img_off_target = imgs_off[img_idx].to(device)
+        #print(intrinsic_target)
+        #print(img_idx)
+        #print("===========================================")
+        ray_origins, ray_directions, cam_origins, cam_directions = get_ray_bundle(H, W, focal, pose_target, intrinsic_target)
+        coords = torch.stack(
+            meshgrid_xy(torch.arange(H).to(device), torch.arange(W).to(device)),
+            dim=-1,
+        )
+        coords = coords.reshape((-1, 2))
+        select_inds = np.random.choice(
+            coords.shape[0], size=(cfg.nerf.train.num_random_rays), replace=False
+        )
+        select_inds = coords[select_inds]
+        #print(ray_origins.shape)
+        #assert 1==0
+        ray_origins = ray_origins[select_inds[:, 0], select_inds[:, 1], :]
+        #print(ray_directions.shape)
+        ray_directions = ray_directions[select_inds[:, 0], select_inds[:, 1], :]
+        #print(ray_directions.shape)
+        # batch_rays = torch.stack([ray_origins, ray_directions], dim=0)
+        #print(img_target.shape)
+        cam_origins = cam_origins[select_inds[:, 0], select_inds[:, 1], :]
+        #print(ray_directions.shape)
+        cam_directions = cam_directions[select_inds[:, 0], select_inds[:, 1], :]
+        
+        target_s = img_target[select_inds[:, 0], select_inds[:, 1]] # [1080]
+        #print(select_inds)
+        #assert 1==0 
+        #print(target_s.shape)
+        #assert 1==0
+        #target_env = pattern_target[select_inds[:, 0], select_inds[:, 1]]
+        target_d = depth_target[select_inds[:, 0], select_inds[:, 1]]
+        target_s_off = img_off_target[select_inds[:, 0], select_inds[:, 1]]
+        target_n = normal_target[select_inds[:, 0], select_inds[:, 1], :]
+        
 
-            #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
-            #rgb_fine = torch.mean(rgb_fine, dim=-1)
-            #print(rgb_coarse.shape, rgb_fine.shape)
-            target_ray_values = target_s.unsqueeze(-1)
-            target_ray_values_off = target_s_off.unsqueeze(-1)
-            #print(rgb_coarse.shape, rgb_fine.shape, target_ray_values.shape)
-            #assert 1==0
+        #print(target_s.shape)
+        #assert 1==0
+        then = time.time()
+        #print(ray_origins.shape, ray_directions.shape)
+        #print(ray_origins[-3:,:], ray_directions[-3:,:])
+        #rgb_coarse, _, _, rgb_fine, _, _, _
+        #print(ir_extrinsic_target)
+        #assert 1==0
+        nerf_out = run_one_iter_of_nerf_ir(
+            H,
+            W,
+            intrinsic_target[0,0],
+            model_coarse,
+            model_fine,
+            model_env_coarse,
+            model_env_fine,
+            #model_fuse,
+            ray_origins,
+            ray_directions,
+            cam_origins.cuda(),
+            cam_directions.cuda(),
+            cfg,
+            mode="train",
+            encode_position_fn=encode_position_fn,
+            encode_direction_fn=encode_direction_fn,
+            m_thres_cand=m_thres_cand,
+            idx=select_inds,
+            joint=is_joint,
+            light_extrinsic=ir_extrinsic_target
+        )
+        rgb_coarse, rgb_off_coarse, rgb_fine, rgb_off_fine = nerf_out[0], nerf_out[1], nerf_out[4], nerf_out[5]
+        depth_fine_nerf = nerf_out[8]
+        alpha_fine = nerf_out[9]
+        normal_fine = nerf_out[10]
+        normals_diff_map = nerf_out[13]
+        d_n_map = nerf_out[14]
+        albedo_cost_map = nerf_out[15]
+        roughness_cost_map = nerf_out[16]
+
+
+        #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
+        #rgb_fine = torch.mean(rgb_fine, dim=-1)
+        #print(rgb_coarse.shape, rgb_fine.shape)
+        target_ray_values = target_s.unsqueeze(-1)
+        target_ray_values_off = target_s_off.unsqueeze(-1)
+        #print(rgb_coarse.shape, rgb_fine.shape, target_ray_values.shape)
+        #assert 1==0
         
         #if i == cfg.experiment.finetune_start:
         #    no_ir_train = False
         if i == cfg.experiment.jointtrain_start:
             is_joint = True
         coarse_loss = 0.0
-        #print(torch.max(model_env_fine.ir_pattern))
 
-        #print(normal_fine.shape, target_n.shape)
-        #assert 1==0
-        """
-        if no_ir_train == False:
-            coarse_loss = torch.nn.functional.mse_loss(
-                rgb_coarse, target_ray_values
-            )
-
-        if no_ir_train == True or jointtrain == True:
-            coarse_loss += torch.nn.functional.mse_loss(
-                rgb_off_coarse, target_ray_values_off
-            )
-        #print(rgb_off_coarse.shape, target_ray_values_off.shape)
-        #assert 1==0
-       
-        fine_loss = None
-        if rgb_fine is not None:
-            fine_loss = 0.0
-
-            if no_ir_train == False:
-                fine_loss = torch.nn.functional.mse_loss(
-                        rgb_fine, target_ray_values
-                )
-
-            if no_ir_train == True or jointtrain == True:
-                fine_loss += torch.nn.functional.mse_loss(
-                    rgb_off_fine, target_ray_values_off
-                )
-            #fine_loss = fine_loss + fine_loss_off
-
-
-        if configargs.depth_supervise == True:
-            print(target_d.shape, alpha_fine.shape)
-            #depth_loss = img2mse(depth_fine_dex[0], depth_target)
-            #print(depth_fine_dex[0].shape, depth_loss)
-            assert 1==0
-            
-        # loss = torch.nn.functional.mse_loss(rgb_pred[..., :3], target_s[..., :3])
-        loss = 0.0
-        # if fine_loss is not None:
-        #     loss = fine_loss
-        # else:
-        #     loss = coarse_loss
-        loss = coarse_loss + (fine_loss if fine_loss is not None else 0.0)
-        
-        #if no_ir_train == True or jointtrain == True:
-        optimizer.zero_grad()
-        #if no_ir_train == False:
-        optimizer_env.zero_grad()
-        loss.backward()
-        psnr = mse2psnr(loss.item())
-        #if no_ir_train == True or jointtrain == True:
-        optimizer.step()
-        #if no_ir_train == False:
-        optimizer_env.step()
-        """
-
-        #coarse_loss = torch.nn.functional.mse_loss(
-        #        rgb_coarse, target_ray_values
-        #)
 
         
         coarse_loss_off = torch.nn.functional.mse_loss(
@@ -466,6 +357,9 @@ def main():
         )
         fine_normal_loss_gt = torch.nn.functional.mse_loss(
             normal_fine, target_n
+        )
+        fine_nerf_depth_loss_gt = torch.nn.functional.mse_loss(
+            depth_fine_nerf, target_d
         )
         #print(d_n_map.shape, (target_n*(-1.)).shape)
         #assert 1==0
@@ -485,40 +379,54 @@ def main():
                cfg.experiment.normal_derived_rate * fine_normal_loss + \
                cfg.experiment.albedo_rate * albedo_smoothness_loss + \
                cfg.experiment.roughness_rate * roughness_smoothness_loss
-        loss = cfg.experiment.ir_on_rate * loss_on + cfg.experiment.ir_off_rate * loss_off
+        loss = cfg.experiment.ir_on_rate * loss_on + \
+               cfg.experiment.ir_off_rate * loss_off + \
+               cfg.experiment.depth_rate * fine_nerf_depth_loss_gt
+
+
+
+        if is_joint and cfg.experiment.grad_norm_rate > 0:
+            grad_params_coarse = torch.autograd.grad(loss, model_coarse.parameters(), create_graph=True)
+            grad_params_fine = torch.autograd.grad(loss, model_fine.parameters(), create_graph=True)
+
+            grad_norm = 0
+            for grad in grad_params_coarse:
+                grad_norm += grad.pow(2).sum()
+            for grad in grad_params_fine:
+                grad_norm += grad.pow(2).sum()
+            
+            grad_norm_loss = grad_norm.sqrt()
+
+            loss += cfg.experiment.grad_norm_rate * grad_norm_loss
+
+
+            
+
+
 
         optimizer.zero_grad()
 
-        optimizer_env.zero_grad()
+        #optimizer_env.zero_grad()
         #loss.backward()
         #loss_off.backward()
         loss.backward()
         psnr = mse2psnr(fine_loss.item())
         #if no_ir_train == True or jointtrain == True:
         optimizer.step()
+        if is_joint and cfg.experiment.grad_norm_rate > 0:
+            del grad_params_coarse, grad_params_fine, grad_norm_loss, grad_norm
         #if no_ir_train == False:
 
-        optimizer_env.step()
+        #optimizer_env.step()
 
-        #issame = True
-        #for params in zip(prev_params, list(model_env_fine.parameters())):
-        #    p1,p2 = params
-        #    if not torch.all(p1 == p2):
-        #        issame = False
-        #        break
 
-        #print(p1,p2)
-        #print(issame)
-        #print(model_env_fine.attenuation)
-        #prev_params = copy.deepcopy(list(model_env_fine.parameters()))
-        #assert 1==0
-        
 
         # Learning rate updates
         num_decay_steps = cfg.scheduler.lr_decay * 1000
         lr_new = cfg.optimizer.lr * (
             cfg.scheduler.lr_decay_factor ** (i / num_decay_steps)
         )
+        #print(num_decay_steps, lr_new)
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr_new
 
@@ -539,16 +447,10 @@ def main():
         writer.add_scalar("train/fine_normal_diff_loss", fine_normal_loss.item(), i)
         writer.add_scalar("train/fine_normal_loss_gt", fine_normal_loss_gt.item(), i)
         writer.add_scalar("train/d_normal_loss_gt", d_normal_loss_gt.item(), i)
+        writer.add_scalar("train/depth_loss", fine_nerf_depth_loss_gt.item(), i)
         writer.add_scalar("train/psnr", psnr, i)
 
-        #print(torch.max(model_env_fine.ir_pattern))
 
-        #writer.add_image(
-        #            "train/img_target",
-        #            cast_to_image(img_target[..., :3]),
-        #            i,
-        #        )
-        #assert 1==0
         # Validation
         if (
             i % cfg.experiment.validate_every == 0
@@ -565,84 +467,60 @@ def main():
             with torch.no_grad():
                 rgb_coarse, rgb_fine = None, None
                 target_ray_values = None
-                if USE_CACHED_DATASET:
-                    datafile = np.random.choice(validation_paths)
-                    cache_dict = torch.load(datafile)
-                    #rgb_coarse, _, _, rgb_fine, _, _ ,_
-                    nerf_out = run_one_iter_of_nerf(
-                        cache_dict["height"],
-                        cache_dict["width"],
-                        cache_dict["focal_length"],
-                        model_coarse,
-                        model_fine,
-                        cache_dict["ray_origins"].to(device),
-                        cache_dict["ray_directions"].to(device),
-                        cfg,
-                        mode="validation",
-                        encode_position_fn=encode_position_fn,
-                        encode_direction_fn=encode_direction_fn,
-                        m_thres_cand=m_thres_cand
-                    )
-                    rgb_coarse, rgb_fine = nerf_out[0], nerf_out[3]
-                    target_ray_values = cache_dict["target"].to(device)
-                else:
-                    img_idx = np.random.choice(i_val)
-                    img_target = images[img_idx].to(device)
-                    pose_target = poses[img_idx, :, :].to(device)
-                    depth_target = depths[img_idx].to(device)
-                    label_target = labels[img_idx].to(device)
-                    img_off_target = imgs_off[img_idx].to(device)
-                    normal_target = normals[img_idx].to(device)
-                    #print(label_target.shape, label_target[135,240])
-                    #assert 1==0
-                    intrinsic_target = intrinsics[img_idx,:,:].to(device)
-                    ray_origins, ray_directions, cam_origins, cam_directions = get_ray_bundle(
-                        H, W, focal, pose_target, intrinsic_target
-                    )
-                    coords = torch.stack(
-                        meshgrid_xy(torch.arange(H).to(device), torch.arange(W).to(device)),
-                        dim=-1,
-                    )
-                    
-                    coords = coords.permute(1,0,2)
-                    coords = coords.reshape((-1, 2))
-                    #print(coords)
-                    
-                    #assert 1==0
-                    #rgb_coarse, _, _, rgb_fine, _, _ ,depth_fine_dex
-                    nerf_out = run_one_iter_of_nerf_ir(
-                        H,
-                        W,
-                        intrinsic_target[0,0],
-                        model_coarse,
-                        model_fine,
-                        model_env_coarse,
-                        model_env_fine,
-                        #model_fuse,
-                        ray_origins,
-                        ray_directions,
-                        cam_origins.cuda(),
-                        cam_directions.cuda(),
-                        cfg,
-                        mode="validation",
-                        encode_position_fn=encode_position_fn,
-                        encode_direction_fn=encode_direction_fn,
-                        m_thres_cand=m_thres_cand,
-                        idx = coords
-                    )
-                    rgb_coarse, rgb_coarse_off, rgb_fine, rgb_fine_off = nerf_out[0], nerf_out[1], nerf_out[4], nerf_out[5]
-                    depth_fine_nerf = nerf_out[8]
-                    normal_fine, albedo_fine, roughness_fine = nerf_out[10], nerf_out[11], nerf_out[12]
-                    #normals_diff_map = nerf_out[13]
-                    depth_fine_dex = list(nerf_out[17:])
-                    target_ray_values = img_target.unsqueeze(-1)
-                    #print(rgb_coarse.shape,rgb_fine.shape, target_ray_values.shape)
-                    #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
-                    #rgb_fine = torch.mean(rgb_fine, dim=-1)
-                #print(target_ray_values.shape, rgb_coarse.shape)
+
+                img_idx = np.random.choice(np.concatenate([i_val, i_test]))
+                img_target = images[img_idx].to(device)
+                pose_target = poses[img_idx, :, :].to(device)
+                ir_extrinsic_target = ir_poses[img_idx,:,:].to(device)
+                depth_target = depths[img_idx].to(device)
+                label_target = labels[img_idx].to(device)
+                img_off_target = imgs_off[img_idx].to(device)
+                normal_target = normals[img_idx].to(device)
+                #print(label_target.shape, label_target[135,240])
                 #assert 1==0
-                #print(depth_fine_dex.shape)
-                #print(rgb_coarse.shape, target_ray_values.shape)
+                intrinsic_target = intrinsics[img_idx,:,:].to(device)
+                ray_origins, ray_directions, cam_origins, cam_directions = get_ray_bundle(
+                    H, W, focal, pose_target, intrinsic_target
+                )
+                coords = torch.stack(
+                    meshgrid_xy(torch.arange(H).to(device), torch.arange(W).to(device)),
+                    dim=-1,
+                )
+                
+                coords = coords.permute(1,0,2)
+                coords = coords.reshape((-1, 2))
+                #print(coords)
+                
+                #assert 1==0
+                #rgb_coarse, _, _, rgb_fine, _, _ ,depth_fine_dex
+                nerf_out = run_one_iter_of_nerf_ir(
+                    H,
+                    W,
+                    intrinsic_target[0,0],
+                    model_coarse,
+                    model_fine,
+                    model_env_coarse,
+                    model_env_fine,
+                    #model_fuse,
+                    ray_origins,
+                    ray_directions,
+                    cam_origins.cuda(),
+                    cam_directions.cuda(),
+                    cfg,
+                    mode="validation",
+                    encode_position_fn=encode_position_fn,
+                    encode_direction_fn=encode_direction_fn,
+                    m_thres_cand=m_thres_cand,
+                    idx = coords,
+                    light_extrinsic=ir_extrinsic_target
+                )
+                rgb_coarse, rgb_coarse_off, rgb_fine, rgb_fine_off = nerf_out[0], nerf_out[1], nerf_out[4], nerf_out[5]
+                depth_fine_nerf = nerf_out[8]
+                normal_fine, albedo_fine, roughness_fine = nerf_out[10], nerf_out[11], nerf_out[12]
+                #normals_diff_map = nerf_out[13]
+                depth_fine_dex = list(nerf_out[17:])
+                target_ray_values = img_target.unsqueeze(-1)
+
                 coarse_loss = 0.#img2mse(rgb_coarse, target_ray_values)
                 loss, fine_loss = 0.0, 0.0
                 if rgb_fine is not None:
@@ -710,6 +588,7 @@ def main():
                     vutils.make_grid(img_off_target, padding=0, nrow=1),
                     i,
                 )
+
                 #print((torch.sum((target_ray_values[...,0]-img_off_target)<0)))
                 #assert 1==0
 
@@ -838,16 +717,12 @@ def main():
             checkpoint_dict = {
                 "iter": i,
                 "model_coarse_state_dict": model_coarse.state_dict(),
-                "model_fine_state_dict": None
-                if not model_fine
-                else model_fine.state_dict(),
+                "model_fine_state_dict": model_fine.state_dict(),
                 "model_env_coarse_state_dict": model_env_coarse.state_dict(),
-                "model_env_fine_state_dict": None
-                if not model_env_fine
-                else model_env_fine.state_dict(),
+                "model_env_fine_state_dict": model_env_fine.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "loss": loss,
-                "psnr": psnr,
+                "psnr": psnr
             }
             torch.save(
                 checkpoint_dict,

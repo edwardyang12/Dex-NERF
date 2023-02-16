@@ -70,6 +70,11 @@ def cumprod_exclusive(tensor: torch.Tensor) -> torch.Tensor:
 
     return cumprod
 
+def get_ir_ray_pixel(surface_xyz, ir_xyz, cam2ir, ir_intrinsic):
+    ray_dir = surface_xyz - ir_xyz
+    pix_xy = torch.matmul(ir_intrinsic, ray_dir)
+    return pix_xy
+
 
 def get_ray_bundle(
     height: int, width: int, focal_length: float, tform_cam2world: torch.Tensor, intrinsic: torch.Tensor

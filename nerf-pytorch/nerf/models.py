@@ -501,7 +501,9 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
         #use_alpha=False,
         color_channel=3,
         H=1080,
-        W=1920
+        W=1920,
+        ir_intrinsic=None,
+        ir_extrinsic=None
     ):
         super(FlexibleIRReflectanceModel, self).__init__()
 
@@ -532,7 +534,11 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
 
         #ir_pattern_ts = torch.zeros([H,W], requires_grad=False)
         #ir_pattern_ts[:int(H/2),:] = 1.
-        self.ir_pattern = torch.nn.parameter.Parameter(torch.zeros([H,W]), requires_grad=True)
+        self.H = 2*H
+        self.W = 2*W
+        self.ir_pattern = torch.nn.parameter.Parameter(torch.zeros([2*W,2*H]), requires_grad=True)
+        self.ir_intrinsic = ir_intrinsic
+        #self.ir_extrinsic = ir_extrinsic
         #self.ir_pattern = torch.nn.parameter.Parameter(ir_pattern_ts, requires_grad=False)
         
 
@@ -541,9 +547,42 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
         self.act_normal = torch.nn.Tanh()
         self.act_brdf = torch.nn.Sigmoid()
 
-    def get_light(self, idx):
+    def get_light(self, surface_xyz, light_extrinsic):
+        w2ir = torch.linalg.inv(light_extrinsic)
+        surface_xyz = surface_xyz.transpose(0,1)
+        #print((torch.matmul(w2ir[:3,:3], surface_xyz)+w2ir[:3,3][...,None]).shape)
+        #assert 1==0
+        ir_xyz = torch.matmul(w2ir[:3,:3], surface_xyz) + w2ir[:3,3][...,None]
+        #irl2s = (surface_xyz - self.ir_extrinsic[:3,3]).detach()
+        irl_pix_homo = torch.matmul(self.ir_intrinsic, ir_xyz)
+        irl_pix = (irl_pix_homo / irl_pix_homo[-1,:])[:2,:]
+        #irl_pix = torch.zeros([2,1]).cuda()
+        #irl_pix[:,0] = torch.tensor([0, 0])
+        irl_pix = irl_pix.transpose(0,1)[None,None,...]
+        irl_pix[:,:,:,0] = ((irl_pix[:,:,:,0]/(self.W-1)) - 0.5) * 2.
+        irl_pix[:,:,:,1] = ((irl_pix[:,:,:,1]/(self.H-1)) - 0.5) * 2.
+
+        grid = torch.zeros(irl_pix.shape).cuda()
+        grid[:,:,:,0] = irl_pix[:,:,:,1]
+        grid[:,:,:,1] = irl_pix[:,:,:,0]
+        
+        #print(torch.max(grid[:,:,:,0]), torch.min(grid[:,:,:,0]), torch.max(grid[:,:,:,1]), torch.min(grid[:,:,:,1]))
+        #assert 1==0
+        #print(grid)
         ir_pattern = torch.nn.functional.softplus(self.ir_pattern, beta=5)
-        return ir_pattern[idx[:, 0], idx[:, 1]]
+        ir_pattern = ir_pattern[None,None,...]
+        #ir_pattern = torch.rand(ir_pattern.shape).cuda()
+
+        #test_grid = torch.zeros([1,1,1,2]).cuda()
+        #test_grid[0,0,0,:] = torch.tensor([-1,-1])
+        light_out = F.grid_sample(ir_pattern, grid, mode="bilinear", padding_mode="reflection", align_corners=True)
+        light_out = light_out[0,0,0,:]
+        #print(light_out.shape)
+        #assert 1==0
+        surf2l = (light_extrinsic[:3,3][...,None] - surface_xyz).transpose(0,1)
+        surf2l = F.normalize(surf2l,p=2.0,dim=1)
+        #surf2l = -l2surf
+        return light_out, surf2l
 
     def forward(self, x):
 
