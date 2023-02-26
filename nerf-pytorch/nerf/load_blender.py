@@ -154,9 +154,9 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
     counts = [0]
     #is_real_rgb = False
     if is_real_rgb:
-        depth_n = "depth.png"
-        extri_n = "extrinsic"
-        intri_n = "intrinsic"
+        depth_n = "depthL.png"
+        extri_n = "extrinsic_l"
+        intri_n = "intrinsic_l"
     else:
         depth_n = "depthL.png"
         extri_n = "extrinsic_l"
@@ -224,7 +224,14 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
             imgs.append(cur_img)
             depths.append(np.array(Image.open(gt_depth_fname))/1000)
             poses.append(np.array(meta[extri_n]))
-            ir_poses.append(np.array(meta["ir_transformation"]))
+            if is_real_rgb:
+                ex_l = np.array(meta['extrinsic_l'])
+                ex_r = np.array(meta['extrinsic_r'])
+                ir_transformation = np.copy(ex_l)
+                ir_transformation[:3,3] = ex_l[:3,3] + 0.5*(ex_r[:3,3]-ex_l[:3,3])
+                ir_poses.append(ir_transformation)
+            else:
+                ir_poses.append(np.array(meta["ir_transformation"]))
             
             labels.append(np.array(Image.open(label_fname)))
             imgs_off.append(cur_img_off)

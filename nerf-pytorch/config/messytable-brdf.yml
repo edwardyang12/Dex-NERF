@@ -3,11 +3,11 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: ../logs_sim_brdf_test_ggx_final_1
+  logdir: ../logs_sim_brdf_test_ggx_final_real
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 150000
+  train_iters: 50000
   finetune_start: 10000
   jointtrain_start: 50000
   # Number of training iterations after which to validate.
@@ -18,10 +18,10 @@ experiment:
   print_every: 1000
 
   normal_gt_rate: 0
-  normal_derived_rate: 0.01
-  albedo_rate: 0.01
-  roughness_rate: 0.01
-  normal_rate: 0.01
+  normal_derived_rate: 0
+  albedo_rate: 0.1
+  roughness_rate: 0.1
+  normal_rate: 0.1
   ir_on_rate: 1
   ir_off_rate: 1
   depth_rate: 0
@@ -33,16 +33,16 @@ dataset:
   # Type of dataset (Blender vs LLFF vs DeepVoxels vs something else)
   type: blender
   # Base directory of dataset.
-  basedir: /media/jianyu/dataset/messy-table-dataset/light_checkerboard
-  is_real_rgb: False
+  basedir: /media/jianyu/dataset/messy-table-dataset/nerf_real_data
+  is_real_rgb: True
   # Optionally, provide a path to the pre-cached dataset dir. This
   # overrides the other dataset options.
   cachedir: /media/jianyu/dataset/messy-table-dataset/cache
   # For the Blender datasets (synthetic), optionally return images
   # at half the original resolution of 800 x 800, to save space.
-  imgname: 0128_irL_kuafu_half.png
-  imgname_off: 0128_irL_kuafu_half_no_ir.png
-  labelname: labelL.png
+  imgname: 1024_irL_real.png
+  imgname_off: 1024_irL_real_off.png
+  labelname: irL_label_image.png
   half_res: True
   H: 270
   W: 480
