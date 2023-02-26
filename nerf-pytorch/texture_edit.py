@@ -247,8 +247,10 @@ def main():
         
         #assert 1==0
         #rgb_coarse, _, _, rgb_fine, _, _ ,depth_fine_dex
-        #albedo_edit = torch.load('/code/test/brdf_map/new_albedo_map.pt').cuda()
-        #roughness_edit = torch.load('/code/test/brdf_map/new_roughness_map.pt').cuda()
+        albedo_edit = torch.load('/code/test/brdf_map/new_albedo_map.pt').cuda()
+        roughness_edit = torch.load('/code/test/brdf_map/new_roughness_map.pt').cuda()
+        print(normal_target.shape)
+        assert 1==0
         normal_edit = F.normalize(normal_target.view([129600, 3]), p=2, dim=-1)
 
         #print(torch.norm(normal_edit, dim=-1))
@@ -273,8 +275,8 @@ def main():
             encode_direction_fn=encode_direction_fn,
             m_thres_cand=m_thres_cand,
             idx = coords,
-            albedo_edit=None,
-            roughness_edit=None,
+            albedo_edit=albedo_edit,
+            roughness_edit=roughness_edit,
             normal_edit=normal_edit,
             logdir=logdir,
             light_extrinsic=ir_extrinsic_target
@@ -285,7 +287,7 @@ def main():
         #print(albedo_fine.shape)
         #assert 1==0
         #normals_diff_map = nerf_out[13]
-        depth_fine_dex = list(nerf_out[17:])
+        depth_fine_dex = list(nerf_out[18:])
         target_ray_values = img_target.unsqueeze(-1)
 
         coarse_loss = 0.#img2mse(rgb_coarse, target_ray_values)

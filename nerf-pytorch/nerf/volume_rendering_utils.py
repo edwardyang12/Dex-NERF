@@ -4,7 +4,8 @@ import torch.nn.functional as F
 from .nerf_helpers import cumprod_exclusive
 from .brdf import *
 
-brdf_specular = specular_pipeline_render_multilight_new
+#brdf_specular = specular_pipeline_render_multilight_new
+brdf_specular = specular_pipeline_render_new
 import os
 
 
@@ -186,6 +187,10 @@ def volume_render_radiance_field_ir_env(
         ),
         dim=-1,
     )
+    #print(depth_values[0,:], dists[0,:])
+    #assert 1==0
+    #print(ray_directions[..., None, :].norm(p=2, dim=-1))
+    #assert 1==0
     dists = dists * ray_directions[..., None, :].norm(p=2, dim=-1)
 
     rgb = radiance_field[..., :color_channel]
@@ -200,6 +205,7 @@ def volume_render_radiance_field_ir_env(
     d_n_map = None
     albedo_smoothness_cost_map = None
     roughness_smoothness_cost_map = None
+    normal_smoothness_cost_map = None
     env_rgb = torch.sigmoid(rgb)
     #print(combined_rgb.shape, env_rgb.shape,radiance_field.shape,radiance_field_env.shape)
     #assert 1==0
@@ -218,6 +224,8 @@ def volume_render_radiance_field_ir_env(
     """
     sigma_a = torch.nn.functional.relu(radiance_field[..., color_channel] + noise)
     alpha = 1.0 - torch.exp(-sigma_a * dists)
+    #print(dists.shape, torch.max(ray_directions[..., None, :].norm(p=2, dim=-1)))
+    #assert 1==0
     weights = alpha * cumprod_exclusive(1.0 - alpha + 1e-10)
     
 
@@ -225,6 +233,7 @@ def volume_render_radiance_field_ir_env(
 
     env_rgb_map = weights[..., None] * env_rgb
     env_rgb_map = env_rgb_map.sum(dim=-2)
+    #print(torch.sum(torch.isnan(weights)), torch.sum(torch.isnan(env_rgb)), torch.sum(torch.isnan(env_rgb_map)))
     #print(depth_values[0,:])
     depth_map = weights * depth_values
 
@@ -267,6 +276,12 @@ def volume_render_radiance_field_ir_env(
         albedo = radiance_field_env[...,3][...,None]
         roughness = radiance_field_env[...,4][...,None] * 0.9 + 0.09
 
+        normal_jitter = radiance_field_env_jitter[...,:3]
+        #normal_norm = F.normalize(normal, dim=-1)
+        #normal_jitter_norm = F.normalize(normal_jitter, dim=-1)
+        #cos_normal_jitter = torch.abs(torch.sum(normal_norm * normal_jitter_norm, dim=-1))
+        #print(cos_normal_jitter.shape, torch.min(cos_normal_jitter), torch.max(cos_normal_jitter))
+        #assert 1==0
         albedo_jitter = radiance_field_env_jitter[...,3][...,None]
         roughness_jitter = radiance_field_env_jitter[...,4][...,None] * 0.9 + 0.09
 
@@ -281,16 +296,20 @@ def volume_render_radiance_field_ir_env(
         
         if joint == True:
             normal_map = torch.sum(weights[..., None] * normal, -2) # bs x 3
+            normal_map_jitter = torch.sum(weights[..., None] * normal_jitter, -2) # bs x 3
             albedo_map = torch.sum(weights[..., None] * albedo, -2)  # bs x 1
             roughness_map = torch.sum(weights[..., None] * roughness, -2)  # bs x 1
         else:
             normal_map = torch.sum(weights[..., None].detach() * normal, -2) # bs x 3
+            normal_map_jitter = torch.sum(weights[..., None].detach() * normal_jitter, -2) # bs x 3
             albedo_map = torch.sum(weights[..., None].detach() * albedo, -2)  # bs x 1
             roughness_map = torch.sum(weights[..., None].detach() * roughness, -2)  # bs x 1
 
+        #print(normal_map.norm(p=2,dim=-1))
         #print(albedo_map.shape)
         #assert 1==0
         normal_map = F.normalize(normal_map, p=2, dim=-1)
+        normal_map_jitter = F.normalize(normal_map_jitter, p=2, dim=-1)
 
         if mode == "test":
             torch.save(weights.cpu(), os.path.join(logdir, "weights.pt"))
@@ -322,8 +341,17 @@ def volume_render_radiance_field_ir_env(
             #normals_diff_map = torch.sum(torch.pow(normal_map - d_n_map, 2), dim=-1, keepdim=True)
         #print(normals_diff_map.shape)
         #assert 1==0
+        cos_normal_jitter = torch.abs(torch.sum(normal_map * normal_map_jitter, dim=-1))
+        #print(cos_normal_jitter.shape, torch.min(cos_normal_jitter), torch.max(cos_normal_jitter))
+        #assert 1==0
+
+
+        normal_smoothness_cost_map = (1. - cos_normal_jitter)[..., None]
+        
         albedo_smoothness_cost_map = torch.sum(weights[..., None].detach() * difference_albedo, -2)  # [..., 1]
         roughness_smoothness_cost_map = torch.sum(weights[..., None].detach() * difference_roughness, -2)  # [..., 1]
+        #print(albedo_smoothness_cost_map.shape, normal_smoothness_cost_map.shape, torch.min(normal_smoothness_cost_map), torch.max(normal_smoothness_cost_map))
+        #assert 1==0
 
         #albedo_smoothness_loss = torch.mean(albedo_smoothness_cost_map)
         #print(albedo_smoothness_loss)
@@ -384,9 +412,15 @@ def volume_render_radiance_field_ir_env(
         #assert 1==0
 
 
-        #print(normal_map.shape, surf2c.shape, surf2l.shape, roughness_map.shape, fresnel_map.shape)
-        specular = brdf_specular(normal_map, surf2c, surf2l, roughness_map, fresnel_map)
-        surface_brdf = albedo_map.unsqueeze(1).expand(-1, nlights, -1) / np.pi + specular # [bs, 1, 1]
+        #print(surf2l.shape, surf2c.shape, normal_map.shape, albedo_map.shape, roughness_map.shape)
+        #assert 1==0
+        #specular = brdf_specular(normal_map, surf2c, surf2l, roughness_map, fresnel_map)
+        surface_brdf = brdf_specular(surf2l, surf2c, normal_map, albedo_map, roughness_map)
+        if mode == "test":
+            torch.save(surface_brdf.cpu(), os.path.join(logdir, "brdf.pt"))
+        #print(surface_brdf.shape)
+        #assert 1==0
+        #surface_brdf = albedo_map.unsqueeze(1).expand(-1, nlights, -1) / np.pi + specular # [bs, 1, 1]
         #surface_brdf = surface_brdf*0. + 1.
         #print(torch.mean(albedo_map))
         #if idx == None:
@@ -422,14 +456,18 @@ def volume_render_radiance_field_ir_env(
         #if joint == True:
         #    rgb_map = env_rgb_map + rgb_ir
         #else:
-        rgb_map = env_rgb_map + rgb_ir
+        if joint == True:
+            rgb_map = env_rgb_map + rgb_ir
+        else:
+            rgb_map = env_rgb_map.detach() + rgb_ir
         rgb_map = torch.clip(rgb_map,0.,1.)
+        #print(torch.sum(torch.isnan(weights)), torch.sum(torch.isnan(rgb)), torch.sum(torch.isnan(env_rgb_map)), torch.sum(torch.isnan(rgb_ir)))
         #print(rgb_map.shape)
         #assert 1==0
 
     out = [rgb_map, env_rgb_map, disp_map, acc_map, weights, depth_map, sigma_a, normal_map, 
             albedo_map, roughness_map, normals_diff_map, d_n_map, 
-            albedo_smoothness_cost_map, roughness_smoothness_cost_map] + depth_map_dex
+            albedo_smoothness_cost_map, roughness_smoothness_cost_map, normal_smoothness_cost_map] + depth_map_dex
     return tuple(out)
 
 def volume_render_reflectance_field(

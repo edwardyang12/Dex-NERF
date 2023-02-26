@@ -538,6 +538,8 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
         self.W = 2*W
         self.ir_pattern = torch.nn.parameter.Parameter(torch.zeros([2*W,2*H]), requires_grad=True)
         self.ir_intrinsic = ir_intrinsic
+        #self.light_attenuation_coeff = torch.nn.parameter.Parameter(torch.zeros([1]))
+
         #self.ir_extrinsic = ir_extrinsic
         #self.ir_pattern = torch.nn.parameter.Parameter(ir_pattern_ts, requires_grad=False)
         
@@ -546,13 +548,19 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
 
         self.act_normal = torch.nn.Tanh()
         self.act_brdf = torch.nn.Sigmoid()
+        self.act_coef = torch.nn.Softplus()
 
     def get_light(self, surface_xyz, light_extrinsic):
         w2ir = torch.linalg.inv(light_extrinsic)
         surface_xyz = surface_xyz.transpose(0,1)
         #print((torch.matmul(w2ir[:3,:3], surface_xyz)+w2ir[:3,3][...,None]).shape)
         #assert 1==0
-        ir_xyz = torch.matmul(w2ir[:3,:3], surface_xyz) + w2ir[:3,3][...,None]
+        ir_xyz = torch.matmul(w2ir[:3,:3], surface_xyz) + w2ir[:3,3][...,None] # 3xn
+
+        #distance = torch.norm(ir_xyz, dim=0) # n
+        #attenuation_multiplier = 1./(1. + self.act_coef(self.light_attenuation_coeff)*(distance**2))
+        #print(distance[0], ir_xyz[:,0])
+        #assert 1==0
         #irl2s = (surface_xyz - self.ir_extrinsic[:3,3]).detach()
         irl_pix_homo = torch.matmul(self.ir_intrinsic, ir_xyz)
         irl_pix = (irl_pix_homo / irl_pix_homo[-1,:])[:2,:]
@@ -576,13 +584,89 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
         #test_grid = torch.zeros([1,1,1,2]).cuda()
         #test_grid[0,0,0,:] = torch.tensor([-1,-1])
         light_out = F.grid_sample(ir_pattern, grid, mode="bilinear", padding_mode="reflection", align_corners=True)
-        light_out = light_out[0,0,0,:]
+        light_out = light_out[0,0,0,:]#*attenuation_multiplier
         #print(light_out.shape)
         #assert 1==0
-        surf2l = (light_extrinsic[:3,3][...,None] - surface_xyz).transpose(0,1)
-        surf2l = F.normalize(surf2l,p=2.0,dim=1)
+        surf2l_ray = (light_extrinsic[:3,3][...,None] - surface_xyz).transpose(0,1)
+
+        
+
+        surf2l = F.normalize(surf2l_ray,p=2.0,dim=1)
+
+
         #surf2l = -l2surf
         return light_out, surf2l
+
+    """
+    def get_light(self, surface_xyz, light_extrinsic):
+        w2ir = torch.linalg.inv(light_extrinsic)
+        surface_xyz = surface_xyz.transpose(0,1)
+        #print((torch.matmul(w2ir[:3,:3], surface_xyz)+w2ir[:3,3][...,None]).shape)
+        #assert 1==0
+        ir_xyz = torch.matmul(w2ir[:3,:3], surface_xyz) + w2ir[:3,3][...,None] # 3xn
+
+        distance = torch.norm(ir_xyz, dim=0) # n
+        attenuation_multiplier = 1./(1. + self.act_coef(self.light_attenuation_coeff)*(distance**2))
+        #print(distance[0], ir_xyz[:,0])
+        #assert 1==0
+        #irl2s = (surface_xyz - self.ir_extrinsic[:3,3]).detach()
+        irl_pix_homo = torch.matmul(self.ir_intrinsic, ir_xyz)
+        irl_pix = (irl_pix_homo / irl_pix_homo[-1,:])[:2,:]
+        #irl_pix = torch.zeros([2,1]).cuda()
+        #irl_pix[:,0] = torch.tensor([0, 0])
+        irl_pix = irl_pix.transpose(0,1)[None,None,...]
+        irl_pix[:,:,:,0] = ((irl_pix[:,:,:,0]/(self.W-1)) - 0.5) * 2.
+        irl_pix[:,:,:,1] = ((irl_pix[:,:,:,1]/(self.H-1)) - 0.5) * 2.
+
+        grid = torch.zeros(irl_pix.shape).cuda()
+        grid[:,:,:,0] = irl_pix[:,:,:,1]
+        grid[:,:,:,1] = irl_pix[:,:,:,0]
+        
+        #print(torch.max(grid[:,:,:,0]), torch.min(grid[:,:,:,0]), torch.max(grid[:,:,:,1]), torch.min(grid[:,:,:,1]))
+        #assert 1==0
+        #print(grid)
+        ir_pattern = torch.nn.functional.softplus(self.ir_pattern, beta=5)
+        ir_pattern = ir_pattern[None,None,...]
+        #ir_pattern = torch.rand(ir_pattern.shape).cuda()
+
+        #test_grid = torch.zeros([1,1,1,2]).cuda()
+        #test_grid[0,0,0,:] = torch.tensor([-1,-1])
+        light_out = F.grid_sample(ir_pattern, grid, mode="bilinear", padding_mode="reflection", align_corners=True)
+        light_out = light_out[0,0,0,:]*attenuation_multiplier
+        #print(light_out.shape)
+        #assert 1==0
+        surf2l_ray = (light_extrinsic[:3,3][...,None] - surface_xyz).transpose(0,1)
+
+        
+
+        surf2l = F.normalize(surf2l_ray,p=2.0,dim=1)
+
+    
+        t_vals = torch.linspace(
+            0.0,
+            1.0,
+            64,
+            dtype=surf2l_ray.dtype,
+            device=surf2l_ray.device,
+        )
+        z_vals = 0 * (1.0 - t_vals) + distance * t_vals
+        pts = surface_xyz[..., None, :] + surf2l[..., None, :] * z_vals[..., :, None]
+        radiance_field = run_network_ir(
+            model_fine,
+            pts,
+            ray_batch[..., -6:-3],
+            getattr(options.nerf, mode).chunksize,
+            encode_position_fn,
+            encode_direction_fn
+        )
+        sigma_a = torch.nn.functional.relu(radiance_field[..., 1])
+        alpha = 1.0 - torch.exp(-sigma_a * dists)
+        weights = alpha * cumprod_exclusive(1.0 - alpha + 1e-10)
+       
+
+        #surf2l = -l2surf
+        return light_out, surf2l
+    """
 
     def forward(self, x):
 

@@ -158,6 +158,21 @@ def gen_error_colormap_depth():
          [2000./(2**2), np.inf, 165, 0, 38]], dtype=np.float32)
     cols[:, 2: 5] /= 255.
     return cols
+def gen_error_colormap_img():
+    cols = np.array(
+        [[0, 0.00001, 0, 0, 0],
+         [0.00001, 4./(2**10) , 49, 54, 149],
+         [4./(2**10) , 4./(2**9) , 69, 117, 180],
+         [4./(2**9) , 4./(2**8) , 116, 173, 209],
+         [4./(2**8), 4./(2**7), 171, 217, 233],
+         [4./(2**7), 4./(2**6), 224, 243, 248],
+         [4./(2**6), 4./(2**5), 254, 224, 144],
+         [4./(2**5), 4./(2**4), 253, 174, 97],
+         [4./(2**4), 4./(2**3), 244, 109, 67],
+         [4./(2**3), 4./(2**2), 215, 48, 39],
+         [4./(2**2), np.inf, 165, 0, 38]], dtype=np.float32)
+    cols[:, 2: 5] /= 255.
+    return cols
 def depth_error_img(D_est_tensor, D_gt_tensor, mask, abs_thres=1., dilate_radius=1):
     D_gt_np = D_gt_tensor.detach().cpu().numpy()
     D_est_np = D_est_tensor.detach().cpu().numpy()
@@ -183,6 +198,32 @@ def depth_error_img(D_est_tensor, D_gt_tensor, mask, abs_thres=1., dilate_radius
         distance = 20
         error_image[:, :10, i * distance:(i + 1) * distance, :] = cols[i, 2:]
     return error_image[0] # [H, W, 3]
+
+def render_error_img(R_est_tensor, R_gt_tensor, mask, abs_thres=1., dilate_radius=1):
+    R_gt_np = R_gt_tensor.detach().cpu().numpy()
+    R_est_np = R_est_tensor.detach().cpu().numpy()
+    mask = mask.detach().cpu().numpy()
+    H, W = R_gt_np.shape
+    # valid mask
+    # mask = (D_gt_np > 0) & (D_gt_np < 1250)
+    # error in percentage. When error <= 1, the pixel is valid since <= 3px & 5%
+    error = np.abs(R_gt_np - R_est_np)
+    error[np.logical_not(mask)] = 0
+    error[mask] = error[mask] / abs_thres
+    # get colormap
+    cols = gen_error_colormap_img()
+    # create error image
+    error_image = np.zeros([H, W, 3], dtype=np.float32)
+    for i in range(cols.shape[0]):
+        error_image[np.logical_and(error >= cols[i][0], error < cols[i][1])] = cols[i, 2:]
+    # TODO: imdilate
+    # error_image = cv2.imdilate(D_err, strel('disk', dilate_radius));
+    error_image[np.logical_not(mask)] = 0.
+    # show color tag in the top-left cornor of the image
+    for i in range(cols.shape[0]):
+        distance = 20
+        error_image[:10, i * distance:(i + 1) * distance, :] = cols[i, 2:]
+    return error_image # [H, W, 3]
 
 def run_network(network_fn, pts, ray_batch, chunksize, embed_fn, embeddirs_fn):
 
@@ -438,6 +479,8 @@ def predict_and_render_radiance_ir(
         dtype=ro.dtype,
         device=ro.device,
     )
+    #print(t_vals)
+    #assert 1==0
     if not getattr(options.nerf, mode).lindisp:
         #print("enter")
         z_vals = near * (1.0 - t_vals) + far * t_vals
@@ -456,6 +499,8 @@ def predict_and_render_radiance_ir(
         z_vals = lower + (upper - lower) * t_rand
     # pts -> (num_rays, N_samples, 3)
     #print(z_vals.shape)
+    #print(rd.norm(p=2,dim=-1))
+    #assert 1==0
     pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
     c_pts = c_ro[..., None, :] + c_rd[..., None, :] * z_vals[..., :, None]
 
@@ -547,7 +592,8 @@ def predict_and_render_radiance_ir(
         # pts -> (N_rays, N_samples + N_importance, 3)
         pts_fine = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
         c_pts_fine = c_ro[..., None, :] + c_rd[..., None, :] * z_vals[..., :, None]
-
+        #print(rd.shape, torch.max(rd.norm(p=2,dim=-1)))
+        #assert 1==0
         radiance_field = run_network_ir(
             model_fine,
             pts_fine,
@@ -658,12 +704,12 @@ def predict_and_render_radiance_ir(
         depth_fine_nerf = fine_out[5]
         alpha_fine = fine_out[6]
         normals_diff_map, d_n_map = fine_out[10], fine_out[11]
-        albedo_cost_map, roughness_cost_map = fine_out[12], fine_out[13]
+        albedo_cost_map, roughness_cost_map, normal_cost_map = fine_out[12], fine_out[13], fine_out[14]
 
         #rgb_fine_env, disp_fine_env, acc_fine_env, depth_fine_env = \
         #fine_out_env[0], fine_out_env[1], fine_out_env[2], fine_out_env[4]
         #print(alpha_fine[500,:])
-        depth_fine_dex = list(fine_out[14:])
+        depth_fine_dex = list(fine_out[15:])
         #rgb_fine_final = torch.clip(rgb_fine + rgb_fine_env,0.,1.)
         #print(depth_fine_nerf.shape, alpha_fine.shape, rgb_coarse.shape)
     #print(acc_fine.shape)
@@ -672,7 +718,7 @@ def predict_and_render_radiance_ir(
     out = [rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, \
         rgb_fine, rgb_off_fine, disp_fine, acc_fine, depth_fine_nerf, \
         alpha_fine, normal_fine, albedo_fine, roughness_fine, normals_diff_map, 
-        d_n_map, albedo_cost_map, roughness_cost_map] + depth_fine_dex
+        d_n_map, albedo_cost_map, roughness_cost_map, normal_cost_map] + depth_fine_dex
     return tuple(out)
 
 def predict_and_render_reflectance_ir(
@@ -980,6 +1026,7 @@ def run_one_iter_of_nerf_ir(
         restore_shapes += [torch.Size([270,480])]
         restore_shapes += [torch.Size([270,480])]
         restore_shapes += [torch.Size([270,480,3])]
+        restore_shapes += [torch.Size([270,480])]
         restore_shapes += [torch.Size([270,480])]
         restore_shapes += [torch.Size([270,480])]
         for i in m_thres_cand:

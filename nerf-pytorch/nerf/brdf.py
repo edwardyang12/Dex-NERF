@@ -51,6 +51,81 @@ import torch.nn.functional as F
 #     V = 0.5 / (GGXL + GGXV)
 #     return V
 
+def specular_pipeline_render_new(pts2l, pts2c, normal, albedo=None, rough=None, f0=0.04, lambert_only=False):
+    """All in the world coordinates.
+    Too low roughness is OK in the forward pass, but may be numerically
+    unstable in the backward pass
+    pts2l: NxLx3
+    pts2c: Nx3
+    normal: Nx3
+    albedo: Nx3
+    rough: Nx1
+    """
+    # Normalize directions and normals
+    pts2l = F.normalize(pts2l, p=2.0, dim=2)
+    pts2c = F.normalize(pts2c, p=2.0, dim=1)
+    normal = F.normalize(normal, p=2.0, dim=1)
+    # Glossy
+    h = pts2l + pts2c[:, None, :] # NxLx3
+    h = F.normalize(h, p=2.0, dim=2)
+    f = _get_f(pts2l, h, f0) # NxL
+    alpha = rough ** 2
+    d = _get_d(h, normal, alpha=alpha) # NxL
+    g = _get_g(pts2c, h, normal, alpha=alpha) # NxL
+    l_dot_n = torch.einsum('ijk,ik->ij', pts2l, normal)
+    v_dot_n = torch.einsum('ij,ij->i', pts2c, normal)
+    denom = 4 * torch.abs(l_dot_n) * torch.abs(v_dot_n)[:, None]
+    microfacet = torch.divide(f * g * d, denom) # NxL
+    brdf_glossy = microfacet[:, :, None]#.tile((1, 1, 3)) # NxLx1
+    # Diffuse
+    lambert = albedo / np.pi # Nx1
+    brdf_diffuse = torch.broadcast_to(
+        lambert[:, None, :], brdf_glossy.shape) # NxLx1
+    # Mix two shaders
+    if lambert_only:
+        brdf = brdf_diffuse
+    else:
+        brdf = brdf_glossy + brdf_diffuse # TODO: energy conservation?
+    return brdf # NxLx1
+
+
+def _get_g(v, m, n, alpha=0.1):
+    """Geometric function (GGX).
+    """
+    cos_theta_v = torch.einsum('ij,ij->i', n, v)
+    cos_theta = torch.einsum('ijk,ik->ij', m, v)
+    denom = cos_theta_v[:, None]
+    div = torch.divide(cos_theta, denom)
+    chi = torch.where(div > 0, 1., 0.)
+    cos_theta_v_sq = torch.square(cos_theta_v)
+    cos_theta_v_sq = torch.clip(cos_theta_v_sq, 0., 1.)
+    denom = cos_theta_v_sq
+    tan_theta_v_sq = torch.divide(1 - cos_theta_v_sq, denom)
+    tan_theta_v_sq = torch.clip(tan_theta_v_sq, 0., np.inf)
+    denom = 1 + torch.sqrt(1 + alpha ** 2 * tan_theta_v_sq[:, None])
+    g = torch.divide(chi * 2, denom)
+    return g # (n_pts, n_lights)
+
+
+def _get_d(m, n, alpha=0.1):
+    """Microfacet distribution (GGX).
+    """
+    cos_theta_m = torch.einsum('ijk,ik->ij', m, n)
+    chi = torch.where(cos_theta_m > 0, 1., 0.)
+    cos_theta_m_sq = torch.square(cos_theta_m)
+    denom = cos_theta_m_sq
+    tan_theta_m_sq = torch.divide(1 - cos_theta_m_sq, denom)
+    denom = np.pi * torch.square(cos_theta_m_sq) * torch.square(
+        alpha ** 2 + tan_theta_m_sq)
+    d = torch.divide(alpha ** 2 * chi, denom)
+    return d # (n_pts, n_lights)
+
+def _get_f(l, m, f0):
+    """Fresnel (Schlick's approximation).
+    """
+    cos_theta = torch.einsum('ijk,ijk->ij', l, m)
+    f = f0 + (1 - f0) * (1 - cos_theta) ** 5
+    return f # (n_pts, n_lights)
 
 
 

@@ -3,11 +3,11 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: ../logs_sim_brdf_test_texture
+  logdir: ../logs_sim_brdf_test_texture_ggx
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 60000
+  train_iters: 100000
   finetune_start: 10000
   jointtrain_start: 50000
   # Number of training iterations after which to validate.
@@ -19,10 +19,13 @@ experiment:
 
   normal_gt_rate: 0
   normal_derived_rate: 0.01
-  albedo_rate: 0.1
-  roughness_rate: 0.1
+  albedo_rate: 0.01
+  roughness_rate: 0.01
+  normal_rate: 0.01
   ir_on_rate: 1
   ir_off_rate: 1
+  depth_rate: 0
+  grad_norm_rate: 0
 
 
 # Dataset parameters.
@@ -157,6 +160,7 @@ optimizer:
   type: Adam
   # Learning rate.
   lr: 1.0E-3
+  lr_joint: 1.0E-4
  
 # Learning rate schedule.
 scheduler:

@@ -2,6 +2,7 @@ import math
 from typing import Optional
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 import torchsearchsorted
 
@@ -120,7 +121,11 @@ def get_ray_bundle(
     )
     ray_origins = torch.inverse(tform_cam2world)[:3, -1].expand(ray_directions.shape)
     origins = torch.zeros(ray_origins.shape)
-    #print(ray_origins.shape, ray_directions.shape, origins.shape, directions.shape)
+    #print(ray_directions.shape)
+    #assert 1==0
+    #ray_directions = F.normalize(ray_directions, p=2, dim=-1)
+    #directions = F.normalize(directions, p=2, dim=-1)
+    #print(ray_directions.shape)
     #print(ray_origins[0,0,:])
     #assert 1==0
     return ray_origins, ray_directions, origins, directions
