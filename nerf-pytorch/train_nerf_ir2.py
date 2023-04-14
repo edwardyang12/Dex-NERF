@@ -253,7 +253,7 @@ def main():
         if is_joint == True and i < cfg.experiment.joint_start:
             if i % cfg.experiment.swap_every == 0:
                 if train_depth:
-                    print("train_depth_swap true")
+                    #print("train_depth_swap true")
                     for param in model_coarse.parameters():
                         param.requires_grad = False
                     for param in model_fine.parameters():
@@ -271,7 +271,7 @@ def main():
 
                     train_depth = False
                 else:
-                    print("train_depth_swap false")
+                    #print("train_depth_swap false")
                     for param in model_coarse.parameters():
                         param.requires_grad = True
                     for param in model_fine.parameters():
@@ -289,7 +289,7 @@ def main():
                     
                     train_depth = True
         elif i == cfg.experiment.joint_start:
-            print("train_joint_start")
+            #print("train_joint_start")
             for param in model_coarse.parameters():
                 param.requires_grad = True
             for param in model_fine.parameters():
