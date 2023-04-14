@@ -42,7 +42,7 @@ dataset:
   type: blender
   # Base directory of dataset.
   basedir: /jianyu-fast-vol/DATA/mvs-nerf-table/data
-  is_real_rgb: False
+  is_rgb: False
   # Optionally, provide a path to the pre-cached dataset dir. This
   # overrides the other dataset options.
   cachedir: /edward-slow-vol/rendering/data/cache
