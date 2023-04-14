@@ -132,7 +132,7 @@ def load_pickle(filename):
         return pickle.load(f)
 
 
-def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=None, is_real_rgb = False, sceneid = 1):
+def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=None, is_rgb = False, sceneid = 1, gt_brdf=False):
     basedir = os.path.join(basedir, str(sceneid))
     imgname = cfg.dataset.imgname
     imgname_off = cfg.dataset.imgname_off
@@ -152,15 +152,16 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
     all_imgs_off = []
     all_normals = []
     counts = [0]
+    if gt_brdf:
+        all_roughness = []
+        all_albedo = []
+    roughness = None
+    albedo = None
     #is_real_rgb = False
-    if is_real_rgb:
-        depth_n = "depthL.png"
-        extri_n = "extrinsic_l"
-        intri_n = "intrinsic_l"
-    else:
-        depth_n = "depthL.png"
-        extri_n = "extrinsic_l"
-        intri_n = "intrinsic_l"
+
+    depth_n = "depthL.png"
+    extri_n = "extrinsic_l"
+    intri_n = "intrinsic_l"
 
     for s in splits:
         if debug:
@@ -177,9 +178,13 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
         imgs_off = []
         normals = []
         ir_poses = []
+        if gt_brdf:
+            roughness = []
+            albedo = []
         #print(os.listdir(path))
         idx = 0
         for prefix in os.listdir(path):
+            #print(prefix)
             
             #print(os.path.join(path, prefix, 'meta.pkl'))
             meta = load_pickle(os.path.join(path, prefix, 'meta.pkl'))
@@ -192,9 +197,13 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
             #for frame in meta["frames"][::skip]:
             fname = os.path.join(path, prefix, imgname)
             fname_off = os.path.join(path, prefix, imgname_off)
+            
+
             gt_depth_fname = os.path.join(path, prefix, depth_n)
             label_fname = os.path.join(path, prefix, label_n)
             normal_fname = os.path.join(path, prefix, "normalL.png")
+            roughness_fname = os.path.join(path, prefix, "roughnessL.png")
+            albedo_fname = os.path.join(path, prefix, "albedoL.png")
             #testimg = np.array(imageio.imread(fname))
             #print(testimg.shape, np.max(testimg), np.min(testimg))
             #cur_img = imageio.imread(fname).astype(int)
@@ -203,8 +212,27 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
 
             cur_img = cv2.imread(fname, cv2.IMREAD_UNCHANGED)
             cur_img_off = cv2.imread(fname_off, cv2.IMREAD_UNCHANGED)
+
+            if is_rgb:
+                cur_img_off = cv2.imread(fname_off, cv2.IMREAD_COLOR)
+            if gt_brdf:
+                roughness.append(np.array(Image.open(roughness_fname))/100.)
+                albedo.append(np.array(Image.open(albedo_fname))/255.)
+            
             normal_img = cv2.imread(normal_fname, cv2.IMREAD_UNCHANGED)
             normal_img = (normal_img.astype(float)) / 1000 - 1
+
+            norm = np.linalg.norm(normal_img, axis=-1)
+            norm_mask = norm == 0
+            dummy_normal = np.zeros([np.sum(norm_mask),3])
+            dummy_normal[:,-1] = 1.
+            normal_img[norm_mask] = dummy_normal
+            #norm = np.linalg.norm(normal_img, axis=-1)
+            #print(norm_mask.shape, normal_img.shape)
+            #if np.sum(norm==0) > 0:
+            #    print(np.sum(norm==0))
+            #    print(normal_img[norm_mask].shape)
+            #    assert 1==0
             
             #print(cur_img.dtype)
             #assert 1==0
@@ -224,14 +252,8 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
             imgs.append(cur_img)
             depths.append(np.array(Image.open(gt_depth_fname))/1000)
             poses.append(np.array(meta[extri_n]))
-            if is_real_rgb:
-                ex_l = np.array(meta['extrinsic_l'])
-                ex_r = np.array(meta['extrinsic_r'])
-                ir_transformation = np.copy(ex_l)
-                ir_transformation[:3,3] = ex_l[:3,3] + 0.5*(ex_r[:3,3]-ex_l[:3,3])
-                ir_poses.append(ir_transformation)
-            else:
-                ir_poses.append(np.array(meta["ir_transformation"]))
+
+            ir_poses.append(np.array(meta["ir_transformation"]))
             
             labels.append(np.array(Image.open(label_fname)))
             imgs_off.append(cur_img_off)
@@ -259,6 +281,9 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
         labels = np.array(labels).astype(np.float32)
         imgs_off = (np.array(imgs_off) / 255.0).astype(np.float32)
         normals = (np.array(normals)).astype(np.float32)
+        if gt_brdf:
+            roughness = (np.array(roughness)).astype(np.float32)
+            albedo = (np.array(albedo)).astype(np.float32)
         #print(imgs.shape)
         counts.append(counts[-1] + imgs.shape[0])
         #assert 1==0
@@ -271,6 +296,9 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
         all_labels.append(labels)
         all_imgs_off.append(imgs_off)
         all_normals.append(normals)
+        if gt_brdf:
+            all_roughness.append(roughness)
+            all_albedo.append(albedo)
 
     i_split = [np.arange(counts[i], counts[i + 1]) for i in range(len(splits))]
 
@@ -282,6 +310,9 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
     labels = np.concatenate(all_labels,0)
     imgs_off = np.concatenate(all_imgs_off,0)
     normals = np.concatenate(all_normals,0)
+    if gt_brdf:
+        roughness = np.concatenate(all_roughness, 0)
+        albedo = np.concatenate(all_albedo, 0)
 
     H, W = imgs[0].shape[:2]
     #camera_angle_x = float(meta["camera_angle_x"])
@@ -351,6 +382,23 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
     labels = torch.stack(labels, 0)
         #TODO for grayscale images manually expand one dimension
         # imgs = imgs.unsqueeze(-1).repeat(1,1,1,3)
+    
+    if gt_brdf:
+        roughness = [
+            torch.from_numpy(
+                cv2.resize(roughness[i], dsize=(W, H), interpolation=cv2.INTER_NEAREST)
+            )
+            for i in range(roughness.shape[0])
+        ]
+        roughness = torch.stack(roughness, 0)
+
+        albedo = [
+            torch.from_numpy(
+                cv2.resize(albedo[i], dsize=(W, H), interpolation=cv2.INTER_NEAREST)
+            )
+            for i in range(albedo.shape[0])
+        ]
+        albedo = torch.stack(albedo, 0)
 
     poses = torch.from_numpy(poses)
     ir_poses = torch.from_numpy(ir_poses)
@@ -360,7 +408,7 @@ def load_messytable_data(basedir, half_res=False, testskip=1, debug=False, cfg=N
     #print(poses.shape)
     #assert 1==0
 
-    return imgs, poses, ir_poses, render_poses, [H, W, focal], i_split, intrinsics, depths, labels, imgs_off, normals
+    return imgs, poses, ir_poses, render_poses, [H, W, focal], i_split, intrinsics, depths, labels, imgs_off, normals, roughness, albedo
 
 
 def load_messytable_data_RF(basedir, half_res=False, testskip=1, debug=False, cfg=None, is_real_rgb = False, sceneid = 1):

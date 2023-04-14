@@ -76,6 +76,7 @@ def specular_pipeline_render_new(pts2l, pts2c, normal, albedo=None, rough=None, 
     v_dot_n = torch.einsum('ij,ij->i', pts2c, normal)
     denom = 4 * torch.abs(l_dot_n) * torch.abs(v_dot_n)[:, None]
     microfacet = torch.divide(f * g * d, denom) # NxL
+    
     brdf_glossy = microfacet[:, :, None]#.tile((1, 1, 3)) # NxLx1
     # Diffuse
     lambert = albedo / np.pi # Nx1
@@ -111,13 +112,27 @@ def _get_d(m, n, alpha=0.1):
     """Microfacet distribution (GGX).
     """
     cos_theta_m = torch.einsum('ijk,ik->ij', m, n)
+    #print(m.shape, n.shape)
     chi = torch.where(cos_theta_m > 0, 1., 0.)
     cos_theta_m_sq = torch.square(cos_theta_m)
-    denom = cos_theta_m_sq
+    denom = cos_theta_m_sq + 1e-10
     tan_theta_m_sq = torch.divide(1 - cos_theta_m_sq, denom)
+    
     denom = np.pi * torch.square(cos_theta_m_sq) * torch.square(
         alpha ** 2 + tan_theta_m_sq)
+    if not torch.all(~torch.isnan(denom)):
+        nan_d = torch.isnan(torch.square(cos_theta_m_sq) * torch.square(
+            alpha ** 2 + tan_theta_m_sq))
+        nan_idx = (nan_d == True).nonzero(as_tuple=True)[0]
+        #print(nan_idx)
+        for i in nan_idx:
+            print(m[i,0,:], n[i,:], tan_theta_m_sq[i,0], \
+                denom[i,0])
+        print("brdf: ", torch.all(~torch.isnan(torch.square(cos_theta_m_sq))).item(), torch.all(~torch.isnan(torch.square(
+            alpha ** 2 + tan_theta_m_sq))).item(), torch.all(~torch.isnan(torch.square(cos_theta_m_sq) * torch.square(
+            alpha ** 2 + tan_theta_m_sq))).item())
     d = torch.divide(alpha ** 2 * chi, denom)
+    
     return d # (n_pts, n_lights)
 
 def _get_f(l, m, f0):

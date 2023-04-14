@@ -503,7 +503,8 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
         H=1080,
         W=1920,
         ir_intrinsic=None,
-        ir_extrinsic=None
+        ir_extrinsic=None,
+        ir_gt=None
     ):
         super(FlexibleIRReflectanceModel, self).__init__()
 
@@ -537,6 +538,9 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
         self.H = 2*H
         self.W = 2*W
         self.ir_pattern = torch.nn.parameter.Parameter(torch.zeros([2*W,2*H]), requires_grad=True)
+        if ir_gt is not None:
+            self.ir_pattern = torch.load(ir_gt)
+            self.ir_pattern.requires_grad = False
         self.ir_intrinsic = ir_intrinsic
         #self.light_attenuation_coeff = torch.nn.parameter.Parameter(torch.zeros([1]))
 

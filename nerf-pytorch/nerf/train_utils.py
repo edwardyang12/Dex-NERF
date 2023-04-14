@@ -458,7 +458,9 @@ def predict_and_render_radiance_ir(
     roughness_edit=None,
     normal_edit=None,
     logdir=None,
-    light_extrinsic=None
+    light_extrinsic=None,
+    is_rgb=False,
+    gt_normal=None
 ):
 
     # TESTED
@@ -555,7 +557,7 @@ def predict_and_render_radiance_ir(
         radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
         white_background=getattr(options.nerf, mode).white_background,
         m_thres_cand=m_thres_cand,
-        color_channel=1,
+        color_channel=3 if is_rgb else 1,
         idx=idx,
         d_n=None,
         joint=joint,
@@ -602,79 +604,83 @@ def predict_and_render_radiance_ir(
             encode_position_fn,
             encode_direction_fn,
         )
+        radiance_field_env = None
+        radiance_field_env_jitter = None
         derived_normals = None
-        if mode == 'train':
-            pts_fine_grad = pts_fine.clone().detach()
-            pts_fine_grad.requires_grad = True
-            model_fine_temp = copy.deepcopy(model_fine)
-            model_fine_temp.cuda().train()
-            ray_batch_grad = ray_batch[..., -6:-3].clone().detach()
-            radiance_field_grad = run_network_ir(
-                model_fine_temp,
-                pts_fine_grad,
-                ray_batch_grad,
+        if not is_rgb:
+            
+            if mode == 'train':
+                pts_fine_grad = pts_fine.clone().detach()
+                pts_fine_grad.requires_grad = True
+                model_fine_temp = copy.deepcopy(model_fine)
+                model_fine_temp.cuda().train()
+                ray_batch_grad = ray_batch[..., -6:-3].clone().detach()
+                radiance_field_grad = run_network_ir(
+                    model_fine_temp,
+                    pts_fine_grad,
+                    ray_batch_grad,
+                    getattr(options.nerf, mode).chunksize,
+                    encode_position_fn,
+                    encode_direction_fn,
+                )
+                #print(pts_fine.requires_grad)
+                #assert 1==0
+                sigma = torch.nn.functional.relu(radiance_field_grad[..., 1])
+
+                d_output = torch.ones_like(sigma, requires_grad=False, device=sigma.device)
+                gradients = torch.autograd.grad(
+                                            outputs=sigma,
+                                            inputs=pts_fine_grad,
+                                            grad_outputs=d_output,
+                                            create_graph=True,
+                                            retain_graph=True,
+                                            only_inputs=True
+                                            )[0]
+                #print(gradients.shape)
+                                        
+                derived_normals = -F.normalize(gradients, p=2, dim=-1, eps=1e-6)
+                derived_normals = derived_normals.view(-1, 3)
+            
+            '''
+            radiance_field_env = run_network_ir_env(
+                model_env_fine,
+                pts_fine,
+                c_pts_fine,
+                ray_batch[..., -6:-3],
+                ray_batch[..., -3:],
                 getattr(options.nerf, mode).chunksize,
                 encode_position_fn,
                 encode_direction_fn,
             )
-            #print(pts_fine.requires_grad)
-            #assert 1==0
-            sigma = torch.nn.functional.relu(radiance_field_grad[..., 1])
+            '''
+            pts_fine_jitter = pts_fine + torch.randn_like(pts_fine) * 0.01
+            radiance_field_env = run_network_ir_env(
+                model_env_fine,
+                pts_fine,
+                getattr(options.nerf, mode).chunksize,
+                encode_position_fn
+            )
+            radiance_field_env_jitter = run_network_ir_env(
+                model_env_fine,
+                pts_fine_jitter,
+                getattr(options.nerf, mode).chunksize,
+                encode_position_fn
+            )
 
-            d_output = torch.ones_like(sigma, requires_grad=False, device=sigma.device)
-            gradients = torch.autograd.grad(
-                                        outputs=sigma,
-                                        inputs=pts_fine_grad,
-                                        grad_outputs=d_output,
-                                        create_graph=True,
-                                        retain_graph=True,
-                                        only_inputs=True
-                                        )[0]
-            #print(gradients.shape)
-                                    
-            derived_normals = -F.normalize(gradients, p=2, dim=-1, eps=1e-6)
-            derived_normals = derived_normals.view(-1, 3)
-        
-        '''
-        radiance_field_env = run_network_ir_env(
-            model_env_fine,
-            pts_fine,
-            c_pts_fine,
-            ray_batch[..., -6:-3],
-            ray_batch[..., -3:],
-            getattr(options.nerf, mode).chunksize,
-            encode_position_fn,
-            encode_direction_fn,
-        )
-        '''
-        pts_fine_jitter = pts_fine + torch.randn_like(pts_fine) * 0.01
-        radiance_field_env = run_network_ir_env(
-            model_env_fine,
-            pts_fine,
-            getattr(options.nerf, mode).chunksize,
-            encode_position_fn
-        )
-        radiance_field_env_jitter = run_network_ir_env(
-            model_env_fine,
-            pts_fine_jitter,
-            getattr(options.nerf, mode).chunksize,
-            encode_position_fn
-        )
-
-        #radiance_fuse = model_fuse(torch.cat((radiance_field[...,:1],radiance_field_env),dim=-1))
-        #rgb_fine, disp_fine, acc_fine, _, _, depth_fine_dex 
-        '''
-        fine_out = volume_render_radiance_field_ir(
-            radiance_field,
-            z_vals,
-            rd,
-            radiance_field_noise_std=getattr(
-                options.nerf, mode
-            ).radiance_field_noise_std,
-            white_background=getattr(options.nerf, mode).white_background,
-            m_thres_cand=m_thres_cand
-        )
-        '''
+            #radiance_fuse = model_fuse(torch.cat((radiance_field[...,:1],radiance_field_env),dim=-1))
+            #rgb_fine, disp_fine, acc_fine, _, _, depth_fine_dex 
+            '''
+            fine_out = volume_render_radiance_field_ir(
+                radiance_field,
+                z_vals,
+                rd,
+                radiance_field_noise_std=getattr(
+                    options.nerf, mode
+                ).radiance_field_noise_std,
+                white_background=getattr(options.nerf, mode).white_background,
+                m_thres_cand=m_thres_cand
+            )
+            '''
         fine_out = volume_render_radiance_field_ir_env(
             radiance_field,
             radiance_field_env,
@@ -687,7 +693,7 @@ def predict_and_render_radiance_ir(
             radiance_field_noise_std=getattr(options.nerf, mode).radiance_field_noise_std,
             white_background=getattr(options.nerf, mode).white_background,
             m_thres_cand=m_thres_cand,
-            color_channel=1,
+            color_channel=3 if is_rgb else 1,
             idx=idx,
             d_n=derived_normals,
             joint=joint,
@@ -696,7 +702,8 @@ def predict_and_render_radiance_ir(
             normal_edit=normal_edit,
             mode=mode,
             logdir=logdir,
-            light_extrinsic=light_extrinsic
+            light_extrinsic=light_extrinsic,
+            gt_normal=gt_normal
         )
         #print(z_vals[0,:])
         rgb_fine, rgb_off_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2], fine_out[3]
@@ -992,7 +999,9 @@ def run_one_iter_of_nerf_ir(
     roughness_edit = None,
     normal_edit=None,
     logdir=None,
-    light_extrinsic=None
+    light_extrinsic=None,
+    is_rgb=False,
+    gt_normal=None
 ):
     viewdirs = None
     #print(ray_directions.shape, ray_origins.shape)
@@ -1008,6 +1017,9 @@ def run_one_iter_of_nerf_ir(
         cam_viewdirs = cam_viewdirs.view((-1, 3))
     # Cache shapes now, for later restoration.
     out_shape = ray_directions[...,0].unsqueeze(-1).shape
+    if is_rgb:
+        out_shape = ray_directions.shape
+
     restore_shapes = [
         out_shape,
         out_shape,
@@ -1071,7 +1083,9 @@ def run_one_iter_of_nerf_ir(
             roughness_edit=roughness_edit,
             normal_edit=normal_edit,
             logdir=logdir,
-            light_extrinsic=light_extrinsic
+            light_extrinsic=light_extrinsic,
+            is_rgb=is_rgb,
+            gt_normal=gt_normal
         )
         for batch in batches
     ]
