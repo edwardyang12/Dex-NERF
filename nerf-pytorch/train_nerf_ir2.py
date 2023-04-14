@@ -249,6 +249,8 @@ def main():
     train_depth = True
 
     for i in trange(start_iter, cfg.experiment.train_iters):
+        if i == cfg.experiment.jointtrain_start:
+            is_joint = True
 
         if is_joint == True and i < cfg.experiment.joint_start:
             if i % cfg.experiment.swap_every == 0:
@@ -436,8 +438,7 @@ def main():
         
         #if i == cfg.experiment.finetune_start:
         #    no_ir_train = False
-        if i == cfg.experiment.jointtrain_start:
-            is_joint = True
+        
         
         #print(model_env_fine.light_attenuation_coeff.item())
         coarse_loss = 0.0
