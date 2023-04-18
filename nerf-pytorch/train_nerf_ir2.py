@@ -209,7 +209,9 @@ def main():
     m_thres_max = cfg.nerf.validation.m_thres
     m_thres_cand = np.arange(5,m_thres_max+5,5)
     os.makedirs(os.path.join(logdir,"pred_depth_dex"), exist_ok=True)
+    os.makedirs(os.path.join(logdir,"pred_depth_err_dex"), exist_ok=True)
     os.makedirs(os.path.join(logdir,"pred_depth_nerf"), exist_ok=True)
+    os.makedirs(os.path.join(logdir,"pred_depth_err_nerf"), exist_ok=True)
 
     writer = SummaryWriter(logdir)
     # Write out config parameters.
@@ -618,23 +620,29 @@ def main():
             i % cfg.experiment.validate_every == 0
             or i == cfg.experiment.train_iters - 1
         ):
+
             tqdm.write("[VAL] =======> Iter: " + str(i))
+            test_mode = "validation"
             model_coarse.eval()
             model_fine.eval()
             #model_fuse.eval()
             if not cfg.dataset.is_rgb:
                 model_env_coarse.eval()
                 model_env_fine.eval()
+
+            mean_nerf_abs_err = 0
+            mean_nerf_err4 = 0
+            mean_nerf_obj_err = 0
+            mean_dex_abs_err = 0
+            mean_dex_err4 = 0
+            mean_dex_obj_err = 0
+
             start = time.time()
-            for test_mode in ["test_val"]:
+            for img_idx in i_val:
                 with torch.no_grad():
                     rgb_coarse, rgb_fine = None, None
                     target_ray_values = None
-                    if test_mode == "test_val":
-                        #img_idx = np.random.choice(np.concatenate([i_val]))
-                        img_idx = i_val[0]
-                    else:
-                        img_idx = np.random.choice(np.concatenate([i_train]))
+
                     img_target = images[img_idx].to(device)
                     pose_target = poses[img_idx, :, :].to(device)
                     ir_extrinsic_target = ir_poses[img_idx,:,:].to(device)
@@ -717,75 +725,6 @@ def main():
                     #)
                     #print(torch.max(rgb_fine), torch.min(rgb_fine))
                     #assert 1==0
-                    
-                    if rgb_fine_off is not None:
-                        if not cfg.dataset.is_rgb:
-                            normal_fine = normal_fine.permute(2,0,1)
-                            normal_fine = (normal_fine.clone().detach()*0.5+0.5)
-                            normal_target = normal_target.permute(2,0,1)
-                            normal_target = (normal_target.clone().detach()*0.5+0.5)
-                            
-                            #print(torch.max(albedo_fine), torch.min(albedo_fine), torch.max(roughness_fine), torch.min(roughness_fine))
-                            writer.add_image(
-                                test_mode+"/normal_fine", vutils.make_grid(normal_fine, padding=0, nrow=1), i
-                            )
-                            writer.add_image(
-                                test_mode+"/albedo_fine", vutils.make_grid(albedo_fine, padding=0, nrow=1), i
-                            )
-                            writer.add_image(
-                                test_mode+"/roughness_fine", vutils.make_grid(roughness_fine, padding=0, nrow=1), i
-                            )
-                            writer.add_image(
-                                test_mode+"/normal_gt", vutils.make_grid(normal_target, padding=0, nrow=1), i
-                            )
-                            ir_light = model_env_fine.ir_pattern.clone().detach()
-                            ir_light_out = torch.nn.functional.softplus(ir_light, beta=5)
-                            #print(ir_light.shape)
-                            #assert 1==0
-                            writer.add_image(
-                                test_mode+"/ir_light", vutils.make_grid(ir_light_out, padding=0, nrow=1, normalize=True), i
-                            )
-                            
-                            writer.add_image(
-                                test_mode+"/rgb_fine", vutils.make_grid(rgb_fine[...,0], padding=0, nrow=1), i
-                            )
-                            writer.add_image(
-                                test_mode+"/rgb_fine_off", vutils.make_grid(rgb_fine_off[...,0], padding=0, nrow=1), i
-                            )
-                            writer.add_image(
-                                test_mode+"/rgb_coarse_off", vutils.make_grid(rgb_coarse_off[...,0], padding=0, nrow=1), i
-                            )
-                        else:
-                            writer.add_image(
-                                test_mode+"/rgb_fine_off", vutils.make_grid(rgb_fine_off[...,:].permute(2,0,1), padding=0, nrow=1), i
-                            )
-                            writer.add_image(
-                                test_mode+"/rgb_coarse_off", vutils.make_grid(rgb_coarse_off[...,:].permute(2,0,1), padding=0, nrow=1), i
-                            )
-                        writer.add_scalar(test_mode+"/fine_loss", fine_loss.item(), i)
-                    #print(cast_to_image(target_ray_values[..., :3]).shape, type(cast_to_image(target_ray_values[..., :3])))
-                    writer.add_image(
-                        test_mode+"/img_target",
-                        vutils.make_grid(target_ray_values[...,0], padding=0, nrow=1),
-                        i,
-                    )
-                    if not cfg.dataset.is_rgb:
-                        writer.add_image(
-                            test_mode+"/img_off_target",
-                            vutils.make_grid(img_off_target, padding=0, nrow=1),
-                            i,
-                        )
-                    else:
-                        writer.add_image(
-                            test_mode+"/img_off_target",
-                            vutils.make_grid(img_off_target.permute(2,0,1), padding=0, nrow=1),
-                            i,
-                        )
-                    
-                    torch.save(model_env_fine.ir_pattern, os.path.join(logdir,'ir_pat.pt'))
-
-                    #print((torch.sum((target_ray_values[...,0]-img_off_target)<0)))
-                    #assert 1==0
 
                     gt_depth_torch = depth_target.cpu()
                     img_ground_mask = (gt_depth_torch > 0) & (gt_depth_torch < 1.25)
@@ -794,53 +733,10 @@ def main():
                     min_abs_depth = None
                     min_cand = 0
 
-                    #print(rgb_fine[...,0].shape, target_ray_values[...,0].shape, rgb_fine_off[...,0].shape, img_off_target.shape,img_ground_mask.unsqueeze(0).shape)
-
-                    if not cfg.dataset.is_rgb:
-                        pred_rgb_fine_err_np = render_error_img(rgb_fine[...,0], target_ray_values[...,0], img_ground_mask)
-                        pred_rgb_fine_off_err_np = render_error_img(rgb_fine_off[...,0], img_off_target, img_ground_mask)
-
-        
-                        writer.add_image(
-                            test_mode+"/rgb_fine_err",
-                            pred_rgb_fine_err_np.transpose((2,0,1)),
-                            i,
-                        )
-                        writer.add_image(
-                            test_mode+"/rgb_fine_off_err",
-                            pred_rgb_fine_off_err_np.transpose((2,0,1)),
-                            i,
-                        )
-
-                    pred_depth_nerf = depth_fine_nerf.detach().cpu()
-                    nerf_err = compute_err_metric(gt_depth_torch, pred_depth_nerf, img_ground_mask)
-                    pred_depth_nerf_np = pred_depth_nerf.numpy()
-                    pred_depth_nerf_np = pred_depth_nerf_np*1000
-                    pred_depth_nerf_np = (pred_depth_nerf_np).astype(np.uint32)
-                    out_pred_depth_nerf = Image.fromarray(pred_depth_nerf_np, mode='I')
-                    out_pred_depth_nerf.save(os.path.join(logdir,"pred_depth_nerf",test_mode+"_pred_depth_step_"+str(i)+".png"))
-                    pred_depth_nerf_err_np = depth_error_img((pred_depth_nerf.unsqueeze(0))*1000, (gt_depth_torch.unsqueeze(0))*1000, img_ground_mask.unsqueeze(0))
-                    #print(rgb_fine[...,0].shape, torch.max(rgb_fine[...,0]), torch.min(rgb_fine[...,0]))
-                    #assert 1==0
-                    writer.add_image(
-                            test_mode+"/depth_pred_nerf_err",
-                            pred_depth_nerf_err_np.transpose((2,0,1)),
-                            i,
-                        )
-                    writer.add_image(
-                            test_mode+"/depth_pred_nerf",
-                            vutils.make_grid(pred_depth_nerf, padding=0, nrow=1, normalize=True, scale_each=True),
-                            i,
-                        )
-
                     for cand in range(m_thres_cand.shape[0]):
-                        #print(m_thres_cand[cand], obj_depth_err_dex.mean())
-
                     
                         pred_depth_torch = depth_fine_dex[cand].detach().cpu()
-                        
-                        #print(gt_depth_torch.shape, pred_depth_torch.shape, img_ground_mask.shape)
-                        #assert 1==0
+
                         err = compute_err_metric(gt_depth_torch, pred_depth_torch, img_ground_mask)
                         obj_depth_err_dex, obj_depth_4_err_dex, obj_count_dex = compute_obj_err(gt_depth_torch, pred_depth_torch, label_target.detach().cpu(), img_ground_mask)
                         if obj_depth_err_dex.mean() < min_abs_err:
@@ -848,85 +744,253 @@ def main():
                             min_err = err
                             min_abs_depth = pred_depth_torch
                             min_cand = m_thres_cand[cand]
-                    #print(type(min_abs_depth), min_abs_depth.shape)
-                    writer.add_image(
-                            test_mode+"/depth_pred_dex",
-                            vutils.make_grid(min_abs_depth, padding=0, nrow=1, normalize=True, scale_each=True),
-                            i,
-                        )
-                    
+
+                    pred_depth_nerf = depth_fine_nerf.detach().cpu()
+                    nerf_err = compute_err_metric(gt_depth_torch, pred_depth_nerf, img_ground_mask)
 
                     total_obj_depth_err_dex, total_obj_depth_4_err_dex, total_obj_count_dex = compute_obj_err(gt_depth_torch, min_abs_depth, label_target.detach().cpu(), img_ground_mask)
                     total_obj_depth_err_nerf, total_obj_depth_4_err_nerf, total_obj_count_nerf = compute_obj_err(gt_depth_torch, pred_depth_nerf, label_target.detach().cpu(), img_ground_mask)
-                    #print(total_obj_depth_err, total_obj_depth_4_err, total_obj_count)
-                    #assert 1==0
-                        
-                    pred_depth_np = min_abs_depth.numpy()
-                    pred_depth_np = pred_depth_np*1000
-                    pred_depth_np = (pred_depth_np).astype(np.uint32)
-                    out_pred_depth = Image.fromarray(pred_depth_np, mode='I')
-                    out_pred_depth.save(os.path.join(logdir,"pred_depth_dex",test_mode+"_pred_depth_step_"+str(i)+".png"))
 
-                    pred_depth_err_np = depth_error_img((min_abs_depth.unsqueeze(0))*1000, (gt_depth_torch.unsqueeze(0))*1000, img_ground_mask.unsqueeze(0))
-                    #print(pred_depth_err_np.transpose((1,2,0)).shape)
-                    writer.add_image(
-                            test_mode+"/depth_pred_err",
-                            pred_depth_err_np.transpose((2,0,1)),
-                            i,
-                        )
+                    mean_nerf_abs_err += nerf_err['depth_abs_err']
+                    mean_nerf_err4 += nerf_err['depth_err4']
+                    mean_nerf_obj_err += total_obj_depth_err_nerf
 
+                    mean_dex_abs_err += min_err['depth_abs_err']
+                    mean_dex_err4 += min_err['depth_err4']
+                    mean_dex_obj_err += total_obj_depth_err_dex
 
-                        #print(depth_fine_dex[cand].shape)
-                    writer.add_image(
-                        test_mode+"/depth_gt",
-                        vutils.make_grid(depth_target, padding=0, nrow=1, normalize=True, scale_each=True),
-                        i,
-                    )
-                    tqdm.write(
-                        "Validation loss: "
-                        + str(loss.item())
-                        + " Validation PSNR: "
-                        + str(psnr)
-                        + " Time: "
-                        + str(time.time() - start)
-                        + " Dex Abs Err: "
-                        + str(min_abs_err)
-                        + " Dex Err4: "
-                        + str(min_err['depth_err4'])
-                        + " Nerf Abs Err: "
-                        + str(nerf_err['depth_abs_err'])
-                        + " Nerf Err4: "
-                        + str(nerf_err['depth_err4'])
-                        + " Dex Obj Err: "
-                        + str(total_obj_depth_err_dex)
-                        + " Nerf Obj Err: "
-                        + str(total_obj_depth_err_nerf)
-                        + " Best Thres: "
-                        + str(min_cand)
-                    )
-                    with open(os.path.join(logdir, test_mode+"_output_result.yml"), "a") as f:
+                    pred_depth_nerf_np = pred_depth_nerf.numpy()
+                    pred_depth_nerf_np = pred_depth_nerf_np*1000
+                    pred_depth_nerf_np = (pred_depth_nerf_np).astype(np.uint32)
+                    out_pred_depth_nerf = Image.fromarray(pred_depth_nerf_np, mode='I')
+                    out_pred_depth_nerf.save(os.path.join(logdir,"pred_depth_nerf",test_mode+"_pred_depth_step_"+str(i)+ "_" + str(img_idx) + ".png"))
+                    pred_depth_nerf_err_np = depth_error_img((pred_depth_nerf.unsqueeze(0))*1000, (gt_depth_torch.unsqueeze(0))*1000, img_ground_mask.unsqueeze(0))
+                    pred_depth_nerf_err_np_img = (pred_depth_nerf_err_np*255).astype(np.uint8)
+                    pred_depth_nerf_err_np_img = Image.fromarray(pred_depth_nerf_err_np_img, mode='RGB')
+                    pred_depth_nerf_err_np_img.save(os.path.join(logdir,"pred_depth_err_nerf",test_mode+"_pred_depth_err_step_"+str(i)+ "_" + str(img_idx) + ".png"))
+                    with open(os.path.join(logdir,"pred_depth_err_nerf", test_mode+"_output_result.txt"), "a") as f:
                         f.write("iter: "
                         + str(i)
-                        + " Validation loss: "
-                        + str(loss.item())
-                        + " Validation PSNR: "
-                        + str(psnr)
-                        + " Time: "
-                        + str(time.time() - start)
-                        + " Dex Abs Err: "
-                        + str(min_abs_err)
-                        + " Dex Err4: "
-                        + str(min_err['depth_err4'])
+                        + " img_idx: "
+                        + str(img_idx)
                         + " Nerf Abs Err: "
                         + str(nerf_err['depth_abs_err'])
                         + " Nerf Err4: "
                         + str(nerf_err['depth_err4'])
-                        + " Dex Obj Err: "
-                        + str(total_obj_depth_err_dex)
                         + " Nerf Obj Err: "
                         + str(total_obj_depth_err_nerf)
                         + "\n"
                         )
+
+                    pred_depth_np = min_abs_depth.numpy()
+                    pred_depth_np = pred_depth_np*1000
+                    pred_depth_np = (pred_depth_np).astype(np.uint32)
+                    out_pred_depth = Image.fromarray(pred_depth_np, mode='I')
+                    out_pred_depth.save(os.path.join(logdir,"pred_depth_dex",test_mode+"_pred_depth_step_"+str(i)+ "_" + str(img_idx) + ".png"))
+                    pred_depth_err_np = depth_error_img((min_abs_depth.unsqueeze(0))*1000, (gt_depth_torch.unsqueeze(0))*1000, img_ground_mask.unsqueeze(0))
+                    pred_depth_err_np_img = (pred_depth_err_np*255).astype(np.uint8)
+                    pred_depth_err_np_img = Image.fromarray(pred_depth_err_np_img, mode='RGB')
+                    pred_depth_err_np_img.save(os.path.join(logdir,"pred_depth_err_dex",test_mode+"_pred_depth_err_step_"+str(i)+ "_" + str(img_idx) + ".png"))
+                    with open(os.path.join(logdir,"pred_depth_err_dex", test_mode+"_output_result.txt"), "a") as f:
+                        f.write("iter: "
+                        + str(i)
+                        + " img_idx: "
+                        + str(img_idx)
+                        + " Dex Abs Err: "
+                        + str(min_err['depth_abs_err'])
+                        + " Dex Err4: "
+                        + str(min_err['depth_err4'])
+                        + " Dex Obj Err: "
+                        + str(total_obj_depth_err_dex)
+                        + "\n"
+                        )
+
+
+            mean_nerf_abs_err = mean_nerf_abs_err/len(i_val)
+            mean_nerf_err4 = mean_nerf_err4/len(i_val)
+            mean_nerf_obj_err = mean_nerf_obj_err/len(i_val)
+
+            mean_dex_abs_err = mean_dex_abs_err/len(i_val)
+            mean_dex_err4 = mean_dex_err4/len(i_val)
+            mean_dex_obj_err = mean_dex_obj_err/len(i_val)
+
+                    
+            if rgb_fine_off is not None:
+                if not cfg.dataset.is_rgb:
+                    normal_fine = normal_fine.permute(2,0,1)
+                    normal_fine = (normal_fine.clone().detach()*0.5+0.5)
+                    normal_target = normal_target.permute(2,0,1)
+                    normal_target = (normal_target.clone().detach()*0.5+0.5)
+                    
+                    #print(torch.max(albedo_fine), torch.min(albedo_fine), torch.max(roughness_fine), torch.min(roughness_fine))
+                    writer.add_image(
+                        test_mode+"/normal_fine", vutils.make_grid(normal_fine, padding=0, nrow=1), i
+                    )
+                    writer.add_image(
+                        test_mode+"/albedo_fine", vutils.make_grid(albedo_fine, padding=0, nrow=1), i
+                    )
+                    writer.add_image(
+                        test_mode+"/roughness_fine", vutils.make_grid(roughness_fine, padding=0, nrow=1), i
+                    )
+                    writer.add_image(
+                        test_mode+"/normal_gt", vutils.make_grid(normal_target, padding=0, nrow=1), i
+                    )
+                    ir_light = model_env_fine.ir_pattern.clone().detach()
+                    ir_light_out = torch.nn.functional.softplus(ir_light, beta=5)
+                    #print(ir_light.shape)
+                    #assert 1==0
+                    writer.add_image(
+                        test_mode+"/ir_light", vutils.make_grid(ir_light_out, padding=0, nrow=1, normalize=True), i
+                    )
+                    
+                    writer.add_image(
+                        test_mode+"/rgb_fine", vutils.make_grid(rgb_fine[...,0], padding=0, nrow=1), i
+                    )
+                    writer.add_image(
+                        test_mode+"/rgb_fine_off", vutils.make_grid(rgb_fine_off[...,0], padding=0, nrow=1), i
+                    )
+                    writer.add_image(
+                        test_mode+"/rgb_coarse_off", vutils.make_grid(rgb_coarse_off[...,0], padding=0, nrow=1), i
+                    )
+                else:
+                    writer.add_image(
+                        test_mode+"/rgb_fine_off", vutils.make_grid(rgb_fine_off[...,:].permute(2,0,1), padding=0, nrow=1), i
+                    )
+                    writer.add_image(
+                        test_mode+"/rgb_coarse_off", vutils.make_grid(rgb_coarse_off[...,:].permute(2,0,1), padding=0, nrow=1), i
+                    )
+                writer.add_scalar(test_mode+"/fine_loss", fine_loss.item(), i)
+            #print(cast_to_image(target_ray_values[..., :3]).shape, type(cast_to_image(target_ray_values[..., :3])))
+            writer.add_image(
+                test_mode+"/img_target",
+                vutils.make_grid(target_ray_values[...,0], padding=0, nrow=1),
+                i,
+            )
+            if not cfg.dataset.is_rgb:
+                writer.add_image(
+                    test_mode+"/img_off_target",
+                    vutils.make_grid(img_off_target, padding=0, nrow=1),
+                    i,
+                )
+            else:
+                writer.add_image(
+                    test_mode+"/img_off_target",
+                    vutils.make_grid(img_off_target.permute(2,0,1), padding=0, nrow=1),
+                    i,
+                )
+            
+            #torch.save(model_env_fine.ir_pattern, os.path.join(logdir,'ir_pat.pt'))
+
+            #print((torch.sum((target_ray_values[...,0]-img_off_target)<0)))
+            #assert 1==0
+
+            
+
+            #print(rgb_fine[...,0].shape, target_ray_values[...,0].shape, rgb_fine_off[...,0].shape, img_off_target.shape,img_ground_mask.unsqueeze(0).shape)
+
+            if not cfg.dataset.is_rgb:
+                pred_rgb_fine_err_np = render_error_img(rgb_fine[...,0], target_ray_values[...,0], img_ground_mask)
+                pred_rgb_fine_off_err_np = render_error_img(rgb_fine_off[...,0], img_off_target, img_ground_mask)
+
+
+                writer.add_image(
+                    test_mode+"/rgb_fine_err",
+                    pred_rgb_fine_err_np.transpose((2,0,1)),
+                    i,
+                )
+                writer.add_image(
+                    test_mode+"/rgb_fine_off_err",
+                    pred_rgb_fine_off_err_np.transpose((2,0,1)),
+                    i,
+                )
+
+            
+            #print(rgb_fine[...,0].shape, torch.max(rgb_fine[...,0]), torch.min(rgb_fine[...,0]))
+            #assert 1==0
+            writer.add_image(
+                    test_mode+"/depth_pred_nerf_err",
+                    pred_depth_nerf_err_np.transpose((2,0,1)),
+                    i,
+                )
+            writer.add_image(
+                    test_mode+"/depth_pred_nerf",
+                    vutils.make_grid(pred_depth_nerf, padding=0, nrow=1, normalize=True, scale_each=True),
+                    i,
+                )
+
+            
+            #print(type(min_abs_depth), min_abs_depth.shape)
+            writer.add_image(
+                    test_mode+"/depth_pred_dex",
+                    vutils.make_grid(min_abs_depth, padding=0, nrow=1, normalize=True, scale_each=True),
+                    i,
+                )
+            
+
+            
+            #print(total_obj_depth_err, total_obj_depth_4_err, total_obj_count)
+            #assert 1==0
+                
+            
+            #print(pred_depth_err_np.transpose((1,2,0)).shape)
+            writer.add_image(
+                    test_mode+"/depth_pred_err",
+                    pred_depth_err_np.transpose((2,0,1)),
+                    i,
+                )
+
+
+                #print(depth_fine_dex[cand].shape)
+            writer.add_image(
+                test_mode+"/depth_gt",
+                vutils.make_grid(depth_target, padding=0, nrow=1, normalize=True, scale_each=True),
+                i,
+            )
+            tqdm.write(
+                "Validation loss: "
+                + str(loss.item())
+                + " Validation PSNR: "
+                + str(psnr)
+                + " Time: "
+                + str(time.time() - start)
+                + " Dex Abs Err: "
+                + str(mean_dex_abs_err)
+                + " Dex Err4: "
+                + str(mean_dex_err4)
+                + " Nerf Abs Err: "
+                + str(mean_nerf_abs_err)
+                + " Nerf Err4: "
+                + str(mean_nerf_err4)
+                + " Dex Obj Err: "
+                + str(mean_dex_obj_err)
+                + " Nerf Obj Err: "
+                + str(mean_nerf_obj_err)
+                + " Best Thres: "
+                + str(min_cand)
+            )
+            with open(os.path.join(logdir, test_mode+"_output_result.txt"), "a") as f:
+                f.write("iter: "
+                + str(i)
+                + " Validation loss: "
+                + str(loss.item())
+                + " Validation PSNR: "
+                + str(psnr)
+                + " Time: "
+                + str(time.time() - start)
+                + " Dex Abs Err: "
+                + str(min_err['depth_abs_err'])
+                + " Dex Err4: "
+                + str(min_err['depth_err4'])
+                + " Nerf Abs Err: "
+                + str(nerf_err['depth_abs_err'])
+                + " Nerf Err4: "
+                + str(nerf_err['depth_err4'])
+                + " Dex Obj Err: "
+                + str(total_obj_depth_err_dex)
+                + " Nerf Obj Err: "
+                + str(total_obj_depth_err_nerf)
+                + "\n"
+                )
 
         if i % cfg.experiment.save_every == 0 or i == cfg.experiment.train_iters - 1:
             if not cfg.dataset.is_rgb:

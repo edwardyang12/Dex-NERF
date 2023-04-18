@@ -542,7 +542,7 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
             self.ir_pattern = torch.load(ir_gt)
             self.ir_pattern.requires_grad = False
         self.ir_intrinsic = ir_intrinsic
-        self.light_attenuation_coeff = torch.nn.parameter.Parameter(torch.zeros([1]))
+        #self.light_attenuation_coeff = torch.nn.parameter.Parameter(torch.zeros([1]))
 
         #self.ir_extrinsic = ir_extrinsic
         #self.ir_pattern = torch.nn.parameter.Parameter(ir_pattern_ts, requires_grad=False)
@@ -561,8 +561,8 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
         #assert 1==0
         ir_xyz = torch.matmul(w2ir[:3,:3], surface_xyz) + w2ir[:3,3][...,None] # 3xn
 
-        distance = torch.norm(ir_xyz, dim=0) # n
-        attenuation_multiplier = 1./(1. + self.act_coef(self.light_attenuation_coeff)*(distance**2))
+        #distance = torch.norm(ir_xyz, dim=0) # n
+        #attenuation_multiplier = 1./(1. + self.act_coef(self.light_attenuation_coeff)*(distance**2))
         #print(distance[0], ir_xyz[:,0])
         #assert 1==0
         #irl2s = (surface_xyz - self.ir_extrinsic[:3,3]).detach()
@@ -590,7 +590,7 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
         light_out = F.grid_sample(ir_pattern, grid, mode="bilinear", padding_mode="reflection", align_corners=True)
         #print(light_out.shape, attenuation_multiplier.shape)
         #assert 1==0
-        light_out = light_out[0,0,0,:]*attenuation_multiplier
+        light_out = light_out[0,0,0,:]#*attenuation_multiplier
         
         #print(light_out.shape)
         #assert 1==0

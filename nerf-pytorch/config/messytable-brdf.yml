@@ -3,13 +3,13 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: ../logs_sim_brdf_table_atten
+  logdir: ../logs_sim_brdf_table_final_2
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 1500
-  finetune_start: 500
-  jointtrain_start: 500
+  train_iters: 150000
+  finetune_start: 50000
+  jointtrain_start: 50000
   # Number of training iterations after which to validate.
   validate_every: 1000
   # Number of training iterations after which to checkpoint.
@@ -17,15 +17,15 @@ experiment:
   # Number of training iterations after which to print progress.
   print_every: 1000
 
-  swap_every: 100
-  joint_start: 1200
+  swap_every: 10000
+  joint_start: 120000
 
   normal_gt_rate: 0
   rougness_gt_rate: 0
   albedo_gt_rate: 0
   depth_rate: 0
   
-  normal_derived_rate: 0.1
+  normal_derived_rate: 1
 
   albedo_rate: 0.1
   roughness_rate: 0.1
