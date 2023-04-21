@@ -31,8 +31,8 @@ experiment:
   roughness_rate: 0.1
   normal_rate: 0.1
 
-  ir_on_rate: 0.5
-  ir_off_rate: 1
+  ir_on_rate: 1
+  ir_off_rate: 2
 
   grad_norm_rate: 0
 
@@ -41,7 +41,7 @@ dataset:
   # Type of dataset (Blender vs LLFF vs DeepVoxels vs something else)
   type: blender
   # Base directory of dataset.
-  basedir: /jianyu-fast-vol/DATA/mvs-nerf-table-near/data
+  basedir: /jianyu-fast-vol/DATA/mvs-nerf-table/data
   is_rgb: False
   # Optionally, provide a path to the pre-cached dataset dir. This
   # overrides the other dataset options.
