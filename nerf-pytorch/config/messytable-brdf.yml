@@ -3,13 +3,13 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: ../logs_sim_brdf_table_final_2
+  logdir: ../logs_sim_brdf_table_final_6
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 150000
-  finetune_start: 50000
-  jointtrain_start: 50000
+  train_iters: 1500000
+  finetune_start: 40000
+  jointtrain_start: 40000
   # Number of training iterations after which to validate.
   validate_every: 1000
   # Number of training iterations after which to checkpoint.
@@ -17,8 +17,8 @@ experiment:
   # Number of training iterations after which to print progress.
   print_every: 1000
 
-  swap_every: 10000
-  joint_start: 120000
+  swap_every: 20000
+  joint_start: 130000
 
   normal_gt_rate: 0
   rougness_gt_rate: 0
@@ -62,7 +62,7 @@ dataset:
   # synthetic (Blender) datasets.
   no_ndc: True
   # Near clip plane (clip all depth values closer than this threshold).
-  near: 0.1
+  near: 0
   # Far clip plane (clip all depth values farther than this threshold).
   far: 4
 
@@ -208,7 +208,7 @@ nerf:
     radiance_field_noise_std: 0.2
     # Sample linearly in disparity space, as opposed to in depth space.
     lindisp: False
-    m_thres: 15
+    m_thres: 30
   # Validation-specific parameters.
   validation:
     # Number of random rays to retain from each image.
@@ -227,4 +227,4 @@ nerf:
     radiance_field_noise_std: 0.
     # Sample linearly in disparity space, as opposed to in depth space.
     lindisp: False
-    m_thres: 20
+    m_thres: 30

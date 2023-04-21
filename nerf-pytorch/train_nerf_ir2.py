@@ -207,7 +207,7 @@ def main():
     os.makedirs(logdir, exist_ok=True)
     
     m_thres_max = cfg.nerf.validation.m_thres
-    m_thres_cand = np.arange(5,m_thres_max+5,5)
+    m_thres_cand = np.arange(5,m_thres_max+5,1)
     os.makedirs(os.path.join(logdir,"pred_depth_dex"), exist_ok=True)
     os.makedirs(os.path.join(logdir,"pred_depth_err_dex"), exist_ok=True)
     os.makedirs(os.path.join(logdir,"pred_depth_nerf"), exist_ok=True)
