@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: jianyu-nerf-brdf-6 # Replace with something like "${USER_NAME}-{EXP_NAME}"
+  name: jianyu-nerf-brdf-7 # Replace with something like "${USER_NAME}-{EXP_NAME}"
   namespace: ucsd-haosulab
 spec:
   ttlSecondsAfterFinished: 86400  # Wait one day to delete completed jobs
