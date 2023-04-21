@@ -7,7 +7,7 @@ experiment:
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 300000
+  train_iters: 100000
   finetune_start: 100000
   jointtrain_start: 100000
   # Number of training iterations after which to validate.
