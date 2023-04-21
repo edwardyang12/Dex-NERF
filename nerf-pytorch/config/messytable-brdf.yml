@@ -64,7 +64,7 @@ dataset:
   # Near clip plane (clip all depth values closer than this threshold).
   near: 0
   # Far clip plane (clip all depth values farther than this threshold).
-  far: 2
+  far: 3
 
 # Model parameters.
 models:
