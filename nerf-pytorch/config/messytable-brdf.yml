@@ -25,7 +25,7 @@ experiment:
   albedo_gt_rate: 0
   depth_rate: 0
   
-  normal_derived_rate: 1
+  normal_derived_rate: 0.1
 
   albedo_rate: 0.1
   roughness_rate: 0.1
@@ -64,7 +64,7 @@ dataset:
   # Near clip plane (clip all depth values closer than this threshold).
   near: 0
   # Far clip plane (clip all depth values farther than this threshold).
-  far: 4
+  far: 2.5
 
 # Model parameters.
 models:
