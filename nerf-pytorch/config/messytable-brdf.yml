@@ -7,8 +7,8 @@ experiment:
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 1500000
-  finetune_start: 40000
+  train_iters: 50000
+  finetune_start: 50000
   jointtrain_start: 40000
   # Number of training iterations after which to validate.
   validate_every: 1000
@@ -64,7 +64,7 @@ dataset:
   # Near clip plane (clip all depth values closer than this threshold).
   near: 0
   # Far clip plane (clip all depth values farther than this threshold).
-  far: 2.5
+  far: 2
 
 # Model parameters.
 models:
