@@ -7,9 +7,9 @@ experiment:
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 50000
-  finetune_start: 50000
-  jointtrain_start: 40000
+  train_iters: 100000
+  finetune_start: 100000
+  jointtrain_start: 100000
   # Number of training iterations after which to validate.
   validate_every: 1000
   # Number of training iterations after which to checkpoint.
@@ -175,7 +175,7 @@ optimizer:
 # Learning rate schedule.
 scheduler:
   # Exponentially decay learning rate (in 1000 steps)
-  lr_decay: 250
+  lr_decay: 50
   # Rate at which to apply this decay.
   lr_decay_factor: 0.1
 
