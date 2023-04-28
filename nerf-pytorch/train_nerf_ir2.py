@@ -792,6 +792,8 @@ def main():
 
                     rgb_fine_np_img = Image.fromarray(rgb_fine_np, mode='L')
                     img_target_np_img = Image.fromarray(img_target_np, mode='L')
+                    pred_depth_nerf_np = pred_depth_nerf.numpy()
+                    depth_np_gt = depth_target.cpu().numpy()
                     if debug_output:
                         rgb_fine_np_img.save(os.path.join(logdir,"pred_nerf",test_mode+"_pred_nerf_step_"+str(i)+ "_" + str(img_idx) + ".png"))
                         img_target_np_img.save(os.path.join(logdir,"pred_nerf_gt",test_mode+"_pred_nerf_gt_step_"+str(i)+ "_" + str(img_idx) + ".png"))
@@ -799,13 +801,13 @@ def main():
                         
                         #assert 1==0
                     
-                        pred_depth_nerf_np = pred_depth_nerf.numpy()
+                        
                         depth_pts = depth2pts_np(pred_depth_nerf_np, intrinsic_target.cpu().numpy(), pose_target.cpu().numpy())
                         pts_o3d = o3d.utility.Vector3dVector(depth_pts)
                         pcd = o3d.geometry.PointCloud(pts_o3d)
                         o3d.io.write_point_cloud(os.path.join(logdir,"pred_depth_pcd_nerf",test_mode+"_pred_depth_pcd_step_"+str(i)+ "_" + str(img_idx) + ".ply"), pcd)
 
-                        depth_np_gt = depth_target.cpu().numpy()
+                        
                         depth_pts = depth2pts_np(depth_np_gt, intrinsic_target.cpu().numpy(), pose_target.cpu().numpy())
                         pts_o3d = o3d.utility.Vector3dVector(depth_pts)
                         pcd = o3d.geometry.PointCloud(pts_o3d)
