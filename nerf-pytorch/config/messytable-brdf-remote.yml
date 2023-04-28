@@ -3,7 +3,7 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: /jianyu-fast-vol/nerf-obj/logs_sim_brdf_swap_on_0_1
+  logdir: /jianyu-fast-vol/nerf-obj/logs_sim_brdf_swap_on_1_0
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
@@ -33,7 +33,7 @@ experiment:
   roughness_rate: 0.1
   normal_rate: 0.1
 
-  ir_on_rate: 0.1
+  ir_on_rate: 1
   ir_off_rate: 1
 
   grad_norm_rate: 0
