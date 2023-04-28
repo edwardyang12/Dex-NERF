@@ -13,6 +13,7 @@ from tqdm import tqdm, trange
 import torchvision.utils as vutils
 from PIL import Image
 import torch.nn.functional as F
+import open3d as o3d
 
 from nerf import compute_err_metric, depth_error_img, compute_obj_err, render_error_img
 
@@ -212,6 +213,11 @@ def main():
     os.makedirs(os.path.join(logdir,"pred_depth_err_dex"), exist_ok=True)
     os.makedirs(os.path.join(logdir,"pred_depth_nerf"), exist_ok=True)
     os.makedirs(os.path.join(logdir,"pred_depth_err_nerf"), exist_ok=True)
+    os.makedirs(os.path.join(logdir,"pred_nerf"), exist_ok=True)
+    os.makedirs(os.path.join(logdir,"pred_nerf_gt"), exist_ok=True)
+    os.makedirs(os.path.join(logdir,"pred_depth_pcd_nerf"), exist_ok=True)
+    os.makedirs(os.path.join(logdir,"pred_depth_pcd_nerf_gt"), exist_ok=True)
+    
 
     writer = SummaryWriter(logdir)
     # Write out config parameters.
@@ -249,10 +255,15 @@ def main():
         param.requires_grad = True
 
     train_depth = True
+    
+    model_backup = None
 
     for i in trange(start_iter, cfg.experiment.train_iters):
         if i == cfg.experiment.jointtrain_start:
             is_joint = True
+            model_backup = copy.deepcopy(model_fine)
+            for param in model_backup.parameters():
+                param.requires_grad = False
 
         if is_joint == True and i < cfg.experiment.joint_start:
             if i % cfg.experiment.swap_every == 0:
@@ -302,6 +313,9 @@ def main():
                 param.requires_grad = True
             for param in model_env_fine.parameters():
                 param.requires_grad = True
+            
+            model_env_fine.ir_pattern.requires_grad = False
+            model_env_fine.static_ir_pat = True
                 
             model_coarse.train()
             model_fine.train()
@@ -410,24 +424,26 @@ def main():
             joint=is_joint,
             light_extrinsic=ir_extrinsic_target,
             is_rgb=cfg.dataset.is_rgb,
+            model_backup=model_backup,
             #gt_normal=target_n
         )
         rgb_coarse, rgb_off_coarse, rgb_fine, rgb_off_fine = nerf_out[0], nerf_out[1], nerf_out[4], nerf_out[5]
         depth_fine_nerf = nerf_out[8]
-        alpha_fine = nerf_out[9]
-        normal_fine = nerf_out[10]
+        depth_fine_nerf_backup = nerf_out[9]
+        alpha_fine = nerf_out[10]
+        normal_fine = nerf_out[11]
         #print(rgb_fine)
-        albedo_fine = nerf_out[11]
-        roughness_fine = nerf_out[12]
+        albedo_fine = nerf_out[12]
+        roughness_fine = nerf_out[13]
         #print(roughness_fine.shape, target_roughness.shape)
         #assert 1==0
 
-        normals_diff_map = nerf_out[13]
-        d_n_map = nerf_out[14]
-        albedo_cost_map = nerf_out[15]
+        normals_diff_map = nerf_out[14]
+        d_n_map = nerf_out[15]
+        albedo_cost_map = nerf_out[16]
         
-        roughness_cost_map = nerf_out[16]
-        normal_cost_map = nerf_out[17]
+        roughness_cost_map = nerf_out[17]
+        normal_cost_map = nerf_out[18]
 
 
         #rgb_coarse = torch.mean(rgb_coarse, dim=-1)
@@ -463,6 +479,7 @@ def main():
         d_normal_loss_gt = 0
         fine_normal_loss_gt = 0
         fine_nerf_depth_loss_gt = 0
+        fine_nerf_depth_loss_backup = 0
         fine_normal_loss = 0
         albedo_smoothness_loss = 0
         roughness_smoothness_loss = 0
@@ -490,6 +507,10 @@ def main():
             fine_normal_loss_gt = torch.nn.functional.mse_loss(
                 normal_fine, target_n
             )
+            if depth_fine_nerf_backup is not None:
+                fine_nerf_depth_loss_backup = torch.nn.functional.mse_loss(
+                    depth_fine_nerf, depth_fine_nerf_backup
+                )
             fine_nerf_depth_loss_gt = torch.nn.functional.mse_loss(
                 depth_fine_nerf, target_d
             )
@@ -536,6 +557,7 @@ def main():
 
         loss = cfg.experiment.ir_on_rate * loss_on + \
             cfg.experiment.ir_off_rate * loss_off + \
+            cfg.experiment.depth_rate_backup * fine_nerf_depth_loss_backup + \
             depth_rate * fine_nerf_depth_loss_gt
 
 
@@ -611,6 +633,8 @@ def main():
             writer.add_scalar("train/fine_normal_loss_gt", fine_normal_loss_gt.item(), i)
             writer.add_scalar("train/d_normal_loss_gt", d_normal_loss_gt.item(), i)
             writer.add_scalar("train/depth_loss", fine_nerf_depth_loss_gt.item(), i)
+            if depth_fine_nerf_backup is not None:
+                writer.add_scalar("train/depth_loss_backup", fine_nerf_depth_loss_backup.item(), i)
             writer.add_scalar("train/psnr", psnr, i)
 
 
@@ -694,9 +718,9 @@ def main():
                     #print(rgb_coarse_off[135,240,:])
 
                     depth_fine_nerf = nerf_out[8]
-                    normal_fine, albedo_fine, roughness_fine = nerf_out[10], nerf_out[11], nerf_out[12]
+                    normal_fine, albedo_fine, roughness_fine = nerf_out[11], nerf_out[12], nerf_out[13]
                     #normals_diff_map = nerf_out[13]
-                    depth_fine_dex = list(nerf_out[18:])
+                    depth_fine_dex = list(nerf_out[19:])
                     target_ray_values = img_target.unsqueeze(-1)
                     target_ray_values_off = img_off_target.unsqueeze(-1)
 
@@ -759,7 +783,38 @@ def main():
                     mean_dex_err4 += min_err['depth_err4']
                     mean_dex_obj_err += total_obj_depth_err_dex
 
+                    rgb_fine_np = rgb_fine.cpu().numpy()[:,:,0]
+                    img_target_np = img_target.cpu().numpy()
+
+                    rgb_fine_np = (rgb_fine_np*255).astype(np.uint8)
+                    img_target_np = (img_target_np*255).astype(np.uint8)
+
+                    rgb_fine_np_img = Image.fromarray(rgb_fine_np, mode='L')
+                    img_target_np_img = Image.fromarray(img_target_np, mode='L')
+
+                    rgb_fine_np_img.save(os.path.join(logdir,"pred_nerf",test_mode+"_pred_nerf_step_"+str(i)+ "_" + str(img_idx) + ".png"))
+                    img_target_np_img.save(os.path.join(logdir,"pred_nerf_gt",test_mode+"_pred_nerf_gt_step_"+str(i)+ "_" + str(img_idx) + ".png"))
+                    #print(np.max(rgb_fine_np), np.min(rgb_fine_np), np.max(img_target_np), np.min(img_target_np))
+                    
+                    #assert 1==0
+
                     pred_depth_nerf_np = pred_depth_nerf.numpy()
+                    depth_pts = depth2pts_np(pred_depth_nerf_np, intrinsic_target.cpu().numpy(), pose_target.cpu().numpy())
+                    pts_o3d = o3d.utility.Vector3dVector(depth_pts)
+                    pcd = o3d.geometry.PointCloud(pts_o3d)
+                    o3d.io.write_point_cloud(os.path.join(logdir,"pred_depth_pcd_nerf",test_mode+"_pred_depth_pcd_step_"+str(i)+ "_" + str(img_idx) + ".ply"), pcd)
+
+                    depth_np_gt = depth_target.cpu().numpy()
+                    depth_pts = depth2pts_np(depth_np_gt, intrinsic_target.cpu().numpy(), pose_target.cpu().numpy())
+                    pts_o3d = o3d.utility.Vector3dVector(depth_pts)
+                    pcd = o3d.geometry.PointCloud(pts_o3d)
+                    o3d.io.write_point_cloud(os.path.join(logdir,"pred_depth_pcd_nerf_gt",test_mode+"_gt_depth_pcd_step_"+str(i)+ "_" + str(img_idx) + ".ply"), pcd)
+
+
+                    #print(pred_depth_nerf.shape, depth_target.shape)
+                    #assert 1==0
+
+
                     pred_depth_nerf_np = pred_depth_nerf_np*1000
                     pred_depth_nerf_np = (pred_depth_nerf_np).astype(np.uint32)
                     out_pred_depth_nerf = Image.fromarray(pred_depth_nerf_np, mode='I')
@@ -1033,6 +1088,30 @@ def cast_to_image(tensor, color_channel=3):
     #print(img.shape)
     return img
 
+def depth2pts_np(depth_map, cam_intrinsic, cam_extrinsic=np.eye(4)):
+    feature_grid = get_pixel_grids_np(depth_map.shape[0], depth_map.shape[1])
+
+    uv = np.matmul(np.linalg.inv(cam_intrinsic), feature_grid)
+    cam_points = uv * np.reshape(depth_map, (1, -1))
+
+    R = cam_extrinsic[:3, :3]
+    t = cam_extrinsic[:3, 3:4]
+    R_inv = np.linalg.inv(R)
+
+    world_points = np.matmul(R_inv, cam_points - t).transpose()
+    return world_points
+
+
+def get_pixel_grids_np(height, width):
+    x_linspace = np.linspace(0.5, width - 0.5, width)
+    y_linspace = np.linspace(0.5, height - 0.5, height)
+    x_coordinates, y_coordinates = np.meshgrid(x_linspace, y_linspace)
+    x_coordinates = np.reshape(x_coordinates, (1, -1))
+    y_coordinates = np.reshape(y_coordinates, (1, -1))
+    ones = np.ones_like(x_coordinates).astype(float)
+    grid = np.concatenate([x_coordinates, y_coordinates, ones], axis=0)
+
+    return grid
 
 if __name__ == "__main__":
     main()

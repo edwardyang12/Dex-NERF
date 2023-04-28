@@ -173,6 +173,7 @@ def volume_render_radiance_field_ir_env(
     mode="train",
     logdir=None,
     light_extrinsic=None,
+    radiance_backup=None,
     gt_normal=None
 ):
     # TESTED
@@ -248,6 +249,21 @@ def volume_render_radiance_field_ir_env(
     #print(torch.sum(torch.isnan(weights)), torch.sum(torch.isnan(env_rgb)), torch.sum(torch.isnan(env_rgb_map)))
     #print(depth_values[0,:])
     depth_map = weights * depth_values
+
+    #######################################################################
+    depth_map_backup = None
+    if radiance_backup is not None:
+        with torch.no_grad():
+            sigma_a_b = torch.nn.functional.relu(radiance_backup[..., color_channel]) 
+            alpha_b = 1.0 - torch.exp(-sigma_a_b * dists)
+            weights_b = alpha_b * cumprod_exclusive(1.0 - alpha_b + 1e-10)# bs x p
+            depth_map_backup = weights_b * depth_values
+            depth_map_backup = depth_map_backup.detach()
+            depth_map_backup = depth_map_backup.sum(dim=-1)
+    
+        #print(depth_map_backup.shape, depth_map.shape)
+        #assert 1==0
+    #######################################################################
 
     depth_map_dex = []
     #print(sigma_a.shape, depth_map.shape)
@@ -518,7 +534,7 @@ def volume_render_radiance_field_ir_env(
         #print(rgb_map.shape)
         #assert 1==0
         #print(rgb_ir[0,0].item())
-    out = [rgb_map, env_rgb_map, disp_map, acc_map, weights, depth_map, sigma_a, normal_map, 
+    out = [rgb_map, env_rgb_map, disp_map, acc_map, weights, depth_map, depth_map_backup, sigma_a, normal_map, 
             albedo_map, roughness_map, normals_diff_map, d_n_map, 
             albedo_smoothness_cost_map, roughness_smoothness_cost_map, normal_smoothness_cost_map] + depth_map_dex
     return tuple(out)

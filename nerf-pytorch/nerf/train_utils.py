@@ -460,6 +460,7 @@ def predict_and_render_radiance_ir(
     logdir=None,
     light_extrinsic=None,
     is_rgb=False,
+    model_backup=None,
     gt_normal=None
 ):
 
@@ -604,6 +605,21 @@ def predict_and_render_radiance_ir(
             encode_position_fn,
             encode_direction_fn,
         )
+        
+        radiance_field_backup = None
+        if model_backup is not None:
+            radiance_field_backup = run_network_ir(
+                model_backup,
+                pts_fine,
+                ray_batch[..., -6:-3],
+                getattr(options.nerf, mode).chunksize,
+                encode_position_fn,
+                encode_direction_fn,
+            )
+
+
+
+
         radiance_field_env = None
         radiance_field_env_jitter = None
         derived_normals = None
@@ -703,27 +719,29 @@ def predict_and_render_radiance_ir(
             mode=mode,
             logdir=logdir,
             light_extrinsic=light_extrinsic,
+            radiance_backup=radiance_field_backup,
             gt_normal=gt_normal
         )
         #print(z_vals[0,:])
         rgb_fine, rgb_off_fine, disp_fine, acc_fine = fine_out[0], fine_out[1], fine_out[2], fine_out[3]
-        normal_fine, albedo_fine, roughness_fine = fine_out[7], fine_out[8], fine_out[9]
+        normal_fine, albedo_fine, roughness_fine = fine_out[8], fine_out[9], fine_out[10]
         depth_fine_nerf = fine_out[5]
-        alpha_fine = fine_out[6]
-        normals_diff_map, d_n_map = fine_out[10], fine_out[11]
-        albedo_cost_map, roughness_cost_map, normal_cost_map = fine_out[12], fine_out[13], fine_out[14]
+        depth_fine_nerf_backup = fine_out[6]
+        alpha_fine = fine_out[7]
+        normals_diff_map, d_n_map = fine_out[11], fine_out[12]
+        albedo_cost_map, roughness_cost_map, normal_cost_map = fine_out[13], fine_out[14], fine_out[15]
 
         #rgb_fine_env, disp_fine_env, acc_fine_env, depth_fine_env = \
         #fine_out_env[0], fine_out_env[1], fine_out_env[2], fine_out_env[4]
         #print(alpha_fine[500,:])
-        depth_fine_dex = list(fine_out[15:])
+        depth_fine_dex = list(fine_out[16:])
         #rgb_fine_final = torch.clip(rgb_fine + rgb_fine_env,0.,1.)
         #print(depth_fine_nerf.shape, alpha_fine.shape, rgb_coarse.shape)
     #print(acc_fine.shape)
     #print(alpha_fine.shape)
     #assert 1==0
     out = [rgb_coarse, rgb_off_coarse, disp_coarse, acc_coarse, \
-        rgb_fine, rgb_off_fine, disp_fine, acc_fine, depth_fine_nerf, \
+        rgb_fine, rgb_off_fine, disp_fine, acc_fine, depth_fine_nerf, depth_fine_nerf_backup, \
         alpha_fine, normal_fine, albedo_fine, roughness_fine, normals_diff_map, 
         d_n_map, albedo_cost_map, roughness_cost_map, normal_cost_map] + depth_fine_dex
     return tuple(out)
@@ -1001,6 +1019,7 @@ def run_one_iter_of_nerf_ir(
     logdir=None,
     light_extrinsic=None,
     is_rgb=False,
+    model_backup=None,
     gt_normal=None
 ):
     viewdirs = None
@@ -1028,19 +1047,20 @@ def run_one_iter_of_nerf_ir(
     ]
     if model_fine:
         restore_shapes += restore_shapes
-        restore_shapes += [ray_directions.shape[:-1]]
+        restore_shapes += [ray_directions.shape[:-1]] # depth_fine
+        restore_shapes += [ray_directions.shape[:-1]] # depth_fine_backup
         #print(out_shape)
         #assert 1==0
         #print(ray_directions.shape)
-        restore_shapes += [torch.Size([270,480,128])]
-        restore_shapes += [torch.Size([270,480,3])]
-        restore_shapes += [torch.Size([270,480])]
-        restore_shapes += [torch.Size([270,480])]
-        restore_shapes += [torch.Size([270,480])]
-        restore_shapes += [torch.Size([270,480,3])]
-        restore_shapes += [torch.Size([270,480])]
-        restore_shapes += [torch.Size([270,480])]
-        restore_shapes += [torch.Size([270,480])]
+        restore_shapes += [torch.Size([270,480,128])] # alpha_fine
+        restore_shapes += [torch.Size([270,480,3])] # normal_fine
+        restore_shapes += [torch.Size([270,480])] # albedo_fine
+        restore_shapes += [torch.Size([270,480])] # roughness_fine
+        restore_shapes += [torch.Size([270,480])] # normal_diff_map
+        restore_shapes += [torch.Size([270,480,3])] # d_n_map
+        restore_shapes += [torch.Size([270,480])] # albedo_cost_map
+        restore_shapes += [torch.Size([270,480])] # roughness_cost_map
+        restore_shapes += [torch.Size([270,480])] # normal_cost_map
         for i in m_thres_cand:
             restore_shapes += [ray_directions.shape[:-1]]
     #print(len(restore_shapes), ray_directions.shape[:-1])
@@ -1085,6 +1105,7 @@ def run_one_iter_of_nerf_ir(
             logdir=logdir,
             light_extrinsic=light_extrinsic,
             is_rgb=is_rgb,
+            model_backup=model_backup,
             gt_normal=gt_normal
         )
         for batch in batches

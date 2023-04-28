@@ -3,13 +3,13 @@ experiment:
   # Unique experiment identifier
   id: messytable-rgb
   # Experiment logs will be stored at "logdir"/"id"
-  logdir: /jianyu-fast-vol/nerf-obj/logs_sim_brdf_swap_sq2_2
+  logdir: /jianyu-fast-vol/nerf-obj/logs_sim_brdf_swap_on_0_0
   # Seed for random number generators (for repeatability).
   randomseed: 11 #42  # Cause, why not?
   # Number of training iterations.
-  train_iters: 300000
-  finetune_start: 100000
-  jointtrain_start: 100000
+  train_iters: 3000
+  finetune_start: 1000
+  jointtrain_start: 1000
   # Number of training iterations after which to validate.
   validate_every: 1000
   # Number of training iterations after which to checkpoint.
@@ -17,13 +17,15 @@ experiment:
   # Number of training iterations after which to print progress.
   print_every: 1000
 
-  swap_every: 30000
-  joint_start: 280000
+  swap_every: 300
+  joint_start: 2800
 
   normal_gt_rate: 0
   rougness_gt_rate: 0
   albedo_gt_rate: 0
   depth_rate: 0
+
+  depth_rate_backup: 0
   
   normal_derived_rate: 0.1
 
@@ -31,8 +33,8 @@ experiment:
   roughness_rate: 0.1
   normal_rate: 0.1
 
-  ir_on_rate: 1
-  ir_off_rate: 2
+  ir_on_rate: 0.0
+  ir_off_rate: 1
 
   grad_norm_rate: 0
 
@@ -41,7 +43,7 @@ dataset:
   # Type of dataset (Blender vs LLFF vs DeepVoxels vs something else)
   type: blender
   # Base directory of dataset.
-  basedir: /jianyu-fast-vol/DATA/mvs-nerf-table-sq2/data
+  basedir: /jianyu-fast-vol/DATA/mvs-nerf-table/data
   is_rgb: False
   # Optionally, provide a path to the pre-cached dataset dir. This
   # overrides the other dataset options.

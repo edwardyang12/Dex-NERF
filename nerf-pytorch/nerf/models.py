@@ -507,6 +507,7 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
         ir_gt=None
     ):
         super(FlexibleIRReflectanceModel, self).__init__()
+        self.static_ir_pat = False
 
         self.num_layers = num_layers
         #self.use_alpha = use_alpha
@@ -587,10 +588,24 @@ class FlexibleIRReflectanceModel(torch.nn.Module):
 
         #test_grid = torch.zeros([1,1,1,2]).cuda()
         #test_grid[0,0,0,:] = torch.tensor([-1,-1])
-        light_out = F.grid_sample(ir_pattern, grid, mode="bilinear", padding_mode="reflection", align_corners=True)
-        #print(light_out.shape, attenuation_multiplier.shape)
-        #assert 1==0
-        light_out = light_out[0,0,0,:]#*attenuation_multiplier
+        if self.static_ir_pat:
+            max_ir = torch.max(ir_pattern)
+            min_ir = torch.min(ir_pattern)
+            
+            mid_ir = 0.5*(max_ir + min_ir)
+            light_out = F.grid_sample(ir_pattern, grid, mode="bilinear", padding_mode="reflection", align_corners=True)
+  
+            light_out[light_out >= mid_ir] = max_ir
+            
+            light_out[light_out < mid_ir] = min_ir
+    
+            light_out = light_out[0,0,0,:]
+
+        else:
+            light_out = F.grid_sample(ir_pattern, grid, mode="bilinear", padding_mode="reflection", align_corners=True)
+            #print(light_out.shape, attenuation_multiplier.shape)
+            #assert 1==0
+            light_out = light_out[0,0,0,:]#*attenuation_multiplier
         
         #print(light_out.shape)
         #assert 1==0
